@@ -59,10 +59,13 @@ export class CachedRemoteStore implements RemoteStore {
 		if (cache && this.now() - cache.fullAt < this.opts.fullRefreshMs) {
 			try {
 				const { changes, newStartPageToken } = await this.inner.listChanges(cache.token);
-				for (const c of changes) applyChange(cache.files, c, vaultKey);
-				const tokenMoved = newStartPageToken !== cache.token;
-				cache.token = newStartPageToken;
-				if (changes.length || tokenMoved) await this.store.save(cache);
+				// Nothing changed in our space: keep the old token and skip the disk write.
+				// Replaying from it later is still correct (it just returns no changes).
+				if (changes.length) {
+					for (const c of changes) applyChange(cache.files, c, vaultKey);
+					cache.token = newStartPageToken;
+					await this.store.save(cache);
+				}
 				this.log(`원격 변경분 ${changes.length}건 반영 (전체 목록 생략)`);
 				return Object.values(cache.files);
 			} catch (e) {

@@ -1,4 +1,4 @@
-import { debounce, Notice, Platform, Plugin, requestUrl, TAbstractFile } from "obsidian";
+import { debounce, Notice, Platform, Plugin, requestUrl, TAbstractFile, TFile, TFolder } from "obsidian";
 import {
 	buildAuthUrl,
 	createPkceSession,
@@ -13,7 +13,7 @@ import {
 import { DriveClient } from "./drive";
 import { PathFilter } from "./filter";
 import { AuthError, HttpFn, lowerKeys } from "./http";
-import { FileStateStore, JsonFileStore, ObsidianLocalFs } from "./obsidianFs";
+import { FileStateStore, JsonFileStore, ObsidianLocalFs, OwnWrites } from "./obsidianFs";
 import { CachedRemoteStore, RemoteCacheData } from "./remoteCache";
 import { DEFAULT_SETTINGS, ObsiDriveSettings } from "./settings";
 import { SyncEngine, toRemoteEntry } from "./sync/engine";
@@ -23,6 +23,7 @@ import { confirmDialog, LogModal, PasteRedirectModal, RemoteTrashModal } from ".
 import { conflictPath, errorMessage, randomString, sha256OfString } from "./util";
 
 const PKCE_STORAGE_KEY = "obsidrive-pkce";
+const LAST_SYNC_STORAGE_KEY = "obsidrive-last-sync";
 const MAX_LOG_LINES = 1000;
 /** Even with the change feed, re-download the full remote listing this often to self-heal. */
 const FULL_LISTING_INTERVAL_MS = 24 * 60 * 60_000;
@@ -49,9 +50,8 @@ export default class ObsiDrivePlugin extends Plugin {
 	private cancelRequested = false;
 	private changedDuringSync = false;
 	private localFs: ObsidianLocalFs | null = null;
-	/** Our own writes keep producing vault events shortly after a sync ends. */
-	private recentOwnWrites: Set<string> = new Set();
-	private recentOwnWritesUntil = 0;
+	/** Expected file states left by the last sync, to tell our own vault events from user edits. */
+	private lastOwnWrites: OwnWrites | null = null;
 	private markerEnsuredFor = "";
 	private statusEl: HTMLElement | null = null;
 	private ribbonEl: HTMLElement | null = null;
@@ -180,7 +180,9 @@ export default class ObsiDrivePlugin extends Plugin {
 		const key = await this.vaultKey();
 		const state = await this.stateStore().load();
 		if (!state || state.vaultKey !== key || !state.lastSync) return;
-		this.lastSyncAt = state.lastSync;
+		// The state file is only rewritten when something changed; the exact time lives in local storage.
+		const stored = Number(this.app.loadLocalStorage(LAST_SYNC_STORAGE_KEY) ?? 0);
+		this.lastSyncAt = Math.max(state.lastSync, Number.isFinite(stored) ? stored : 0);
 		if (this.settings.syncedVaultKey !== key) {
 			this.settings.syncedVaultKey = key;
 			await this.saveData(this.settings);
@@ -365,14 +367,27 @@ export default class ObsiDrivePlugin extends Plugin {
 
 	private onVaultChange(file: TAbstractFile, oldPath?: string) {
 		if (!this.isConnected() || this.settings.paused) return;
-		const isOwn = (set: Set<string> | undefined) => !!set && (set.has(file.path) || (!!oldPath && set.has(oldPath)));
+		const own = this.localFs?.ownWrites ?? this.lastOwnWrites;
+		if (own && this.isOwnEvent(own, file.path) && (!oldPath || this.isOwnEvent(own, oldPath))) return;
 		if (this.syncing) {
-			if (isOwn(this.localFs?.ownWrites)) return;
 			this.changedDuringSync = true;
 			return;
 		}
-		if (Date.now() < this.recentOwnWritesUntil && isOwn(this.recentOwnWrites)) return;
 		if (this.settings.syncAfterChangeSeconds > 0) this.debouncedSync();
+	}
+
+	/**
+	 * An event is ours only if the file is still exactly in the state the sync left it in.
+	 * If the user edited the same path afterwards, mtime/size differ and it counts as a change.
+	 */
+	private isOwnEvent(own: OwnWrites, path: string): boolean {
+		const expected = own.get(path);
+		if (expected === undefined) return false;
+		if (expected === "pending") return true; // fired from inside our own write call
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (expected === "folder") return file instanceof TFolder;
+		if (expected === null) return file === null; // we removed or moved it away
+		return file instanceof TFile && file.stat.mtime === expected.mtime && file.stat.size === expected.size;
 	}
 
 	restartScheduler() {
@@ -508,7 +523,11 @@ export default class ObsiDrivePlugin extends Plugin {
 			}
 			const report = await engine.run(!!opts.dryRun);
 			this.lastReport = report;
-			if (!opts.dryRun) this.lastSyncAt = Date.now();
+			// Cancelled or guard-stopped runs are not completed syncs.
+			if (!opts.dryRun && !report.aborted) {
+				this.lastSyncAt = Date.now();
+				this.app.saveLocalStorage(LAST_SYNC_STORAGE_KEY, String(this.lastSyncAt));
+			}
 			if (!opts.dryRun && !report.aborted && s.syncedVaultKey !== vaultKey) {
 				s.syncedVaultKey = vaultKey;
 				await this.saveData(s);
@@ -529,8 +548,7 @@ export default class ObsiDrivePlugin extends Plugin {
 			}
 			return report;
 		} finally {
-			this.recentOwnWrites = localFs.ownWrites;
-			this.recentOwnWritesUntil = Date.now() + 5000;
+			this.lastOwnWrites = localFs.ownWrites;
 			this.localFs = null;
 		}
 	}

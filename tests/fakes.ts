@@ -32,6 +32,9 @@ export class FakeDrive implements RemoteStore {
 	log: RemoteChange[] = [];
 	/** Tokens below this are rejected, like an expired Drive page token. */
 	minValidToken = 0;
+	/** Hooks to simulate other devices or the user acting in the middle of a sync. */
+	onListed?: () => Promise<void>;
+	onDownload?: (id: string) => void;
 	private seq = 0;
 	constructor(private clock: Clock) {}
 
@@ -47,7 +50,9 @@ export class FakeDrive implements RemoteStore {
 		this.count("changes");
 		const n = Number(token);
 		if (!Number.isInteger(n) || n < this.minValidToken || n > this.log.length) throw new HttpError("invalid token", 400);
-		return { changes: this.log.slice(n).map((c) => ({ ...c })), newStartPageToken: String(this.log.length) };
+		const result = { changes: this.log.slice(n).map((c) => ({ ...c })), newStartPageToken: String(this.log.length) };
+		await this.fireListed();
+		return result;
 	}
 	/** Deletes everything, like "delete hidden app data" in Drive settings. */
 	wipe() {
@@ -69,9 +74,16 @@ export class FakeDrive implements RemoteStore {
 			else target[k] = v;
 		}
 	}
+	private async fireListed() {
+		const hook = this.onListed;
+		this.onListed = undefined; // one-shot
+		await hook?.();
+	}
 	async listVault(vaultKey: string) {
 		this.count("list");
-		return [...this.files.values()].filter((f) => f.appProperties.ov === vaultKey).map((f) => this.view(f));
+		const result = [...this.files.values()].filter((f) => f.appProperties.ov === vaultKey).map((f) => this.view(f));
+		await this.fireListed();
+		return result;
 	}
 	async getMeta(id: string) {
 		this.count("getMeta");
@@ -82,7 +94,9 @@ export class FakeDrive implements RemoteStore {
 		this.count("download");
 		const f = this.files.get(id);
 		if (!f) throw new Error("404");
-		return f.data.slice(0);
+		const data = f.data.slice(0);
+		this.onDownload?.(id);
+		return data;
 	}
 	async create(name: string, appProperties: AppProps, data: ArrayBuffer) {
 		this.count("create");
@@ -177,20 +191,24 @@ export class FakeFs implements LocalFs {
 
 export class MemStore implements StateStore {
 	state: SyncState | null = null;
+	saves = 0;
 	async load() {
 		return this.state ? (JSON.parse(JSON.stringify(this.state)) as SyncState) : null;
 	}
 	async save(s: SyncState) {
+		this.saves++;
 		this.state = JSON.parse(JSON.stringify(s));
 	}
 }
 
 export class MemJson<T> implements JsonStore<T> {
 	value: T | null = null;
+	saves = 0;
 	async load() {
 		return this.value ? (JSON.parse(JSON.stringify(this.value)) as T) : null;
 	}
 	async save(v: T) {
+		this.saves++;
 		this.value = JSON.parse(JSON.stringify(v));
 	}
 }

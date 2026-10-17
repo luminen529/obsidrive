@@ -156,8 +156,16 @@ export class SyncEngine {
 			}
 
 			await this.apply(actions, local, report);
-			this.state.lastSync = this.now();
-			await this.saveState(true);
+			if (cfg.isCancelled?.()) {
+				// Work already done is recorded in the base state, but the run is not a completed sync.
+				report.aborted = "사용자가 동기화를 취소했습니다.";
+				return report;
+			}
+			// Only touch the disk when something changed (or the very first time).
+			if (this.dirty || !this.state.lastSync) {
+				this.state.lastSync = this.now();
+				await this.saveState(true);
+			}
 		} catch (e) {
 			report.aborted = errorMessage(e);
 			throw Object.assign(e instanceof Error ? e : new Error(String(e)), { report });
@@ -243,12 +251,32 @@ export class SyncEngine {
 		}
 	}
 
-	private async writeAndRecord(path: string, r: RemoteEntry, data: ArrayBuffer, hash: string) {
+	/**
+	 * Writes downloaded content, re-checking the local file right before the write:
+	 * the download may have taken a while and the user may have kept typing.
+	 * `seen` is the local state the plan was based on (undefined = file did not exist).
+	 */
+	private async writeAndRecord(path: string, r: RemoteEntry, data: ArrayBuffer, hash: string, seen: LocalEntry | undefined) {
+		if (!(await this.unchangedSincePlan(path, seen))) {
+			throw new SkipError("다운로드하는 동안 로컬 파일이 수정됨 — 덮어쓰지 않음 (다음 동기화에서 충돌로 처리)");
+		}
 		await this.local.write(path, data, r.mtime || r.modifiedTime);
 		const st = await this.local.stat(path);
 		if (!st) throw new Error("쓰기 후 파일을 찾을 수 없음");
 		this.setBase(path, { h: hash, lm: st.mtime, ls: st.size, rid: r.id });
 		if (!r.hash) await this.remote.updateMeta(r.id, { appProperties: { [PROP_HASH]: hash } });
+	}
+
+	/**
+	 * Optimistic concurrency for remote writes: re-reads the remote file and checks it
+	 * still has the content the plan was based on. Drive has no conditional writes,
+	 * so a very small window remains between this check and the write.
+	 */
+	private async remoteState(remoteId: string, expectHash: string): Promise<"same" | "changed" | "deleted" | "gone"> {
+		const meta = await this.remote.getMeta(remoteId);
+		if (!meta) return "gone";
+		if (meta.appProperties[PROP_DELETED]) return "deleted";
+		return (meta.appProperties[PROP_HASH] ?? "") === expectHash ? "same" : "changed";
 	}
 
 	private async doUpload(path: string, remoteId: string | undefined, expectRemoteHash: string | undefined, name?: string) {
@@ -257,12 +285,9 @@ export class SyncEngine {
 		if (remoteId) {
 			// Optimistic concurrency: make sure nobody replaced the remote file since we listed it.
 			if (expectRemoteHash !== undefined) {
-				const meta = await this.remote.getMeta(remoteId);
-				const cur = meta?.appProperties[PROP_HASH] ?? "";
-				if (meta && !meta.appProperties[PROP_DELETED] && cur !== expectRemoteHash) {
-					throw new SkipError("원격 파일이 동기화 도중 변경됨 (다음 동기화에서 처리)");
-				}
-				if (!meta) remoteId = undefined;
+				const st = await this.remoteState(remoteId, expectRemoteHash);
+				if (st === "changed") throw new SkipError("원격 파일이 동기화 도중 변경됨 (다음 동기화에서 처리)");
+				if (st === "gone") remoteId = undefined;
 			}
 		}
 		if (remoteId) f = await this.remote.updateContent(remoteId, { name: name ?? path, appProperties: this.props(hash, mtime) }, data);
@@ -315,7 +340,7 @@ export class SyncEngine {
 							throw new SkipError("로컬 파일이 동기화 도중 변경됨 (다음 동기화에서 처리)");
 						}
 						const { data, hash } = await this.downloadVerified(a.remote);
-						await this.writeAndRecord(a.path, a.remote, data, hash);
+						await this.writeAndRecord(a.path, a.remote, data, hash, local.get(a.path));
 						report.downloaded.push(a.path);
 						if (isConfig(a.path)) report.configChanged = true;
 						cfg.log(`↓ ${a.path} (${a.reason})`);
@@ -334,6 +359,16 @@ export class SyncEngine {
 						break;
 					}
 					case "deleteRemote": {
+						// A newer edit from another device must win over this deletion.
+						const st = await this.remoteState(a.remoteId, this.state.files[a.path]?.h ?? "");
+						if (st === "changed") {
+							throw new SkipError("다른 기기에서 수정되어 원격 삭제를 취소함 (다음 동기화에서 다운로드)");
+						}
+						if (st === "gone" || st === "deleted") {
+							this.setBase(a.path, null);
+							cfg.log(`원격에서 이미 삭제됨: ${a.path}`);
+							break;
+						}
 						// Soft delete: keep the content as a tombstone so it can be restored.
 						await this.remote.updateMeta(a.remoteId, {
 							appProperties: { [PROP_DELETED]: String(this.now()), [PROP_DEVICE]: cfg.device.slice(0, 30) },
@@ -346,9 +381,15 @@ export class SyncEngine {
 					case "renameRemote": {
 						const l = local.get(a.to);
 						if (!l?.hash) throw new SkipError("이름 변경 대상 해시 없음");
+						// The rename only makes sense if the remote still holds this exact content.
+						const st = await this.remoteState(a.remoteId, l.hash);
+						if (st !== "same") {
+							throw new SkipError("원격 파일이 동기화 도중 변경되어 이름 변경을 건너뜀 (다음 동기화에서 처리)");
+						}
+						// Only the name changes; the content hash stays as the remote recorded it.
 						await this.remote.updateMeta(a.remoteId, {
 							name: a.to,
-							appProperties: { ...this.props(l.hash, l.mtime) },
+							appProperties: { [PROP_DEVICE]: cfg.device.slice(0, 30) },
 						});
 						this.setBase(a.from, null);
 						this.setBase(a.to, { h: l.hash, lm: l.mtime, ls: l.size, rid: a.remoteId });
@@ -436,6 +477,9 @@ export class SyncEngine {
 			return;
 		}
 		const { data, hash } = await this.downloadVerified(a.remote);
+		if (!(await this.unchangedSincePlan(a.path, seen))) {
+			throw new SkipError("다운로드하는 동안 로컬 파일이 수정됨 — 다음 동기화에서 처리");
+		}
 		if (a.resolution === "mergeList") {
 			const merged = mergeJsonLists(await this.local.read(a.path), data);
 			report.configChanged = true;
@@ -447,13 +491,13 @@ export class SyncEngine {
 				return;
 			}
 			// Not a list, or nothing to add: take the remote version.
-			await this.writeAndRecord(a.path, a.remote, data, hash);
+			await this.writeAndRecord(a.path, a.remote, data, hash, seen);
 			report.downloaded.push(a.path);
 			cfg.log(`⚔ 첫 동기화 → 원격 사용: ${a.path}`);
 			return;
 		}
 		if (a.resolution === "useRemote") {
-			await this.writeAndRecord(a.path, a.remote, data, hash);
+			await this.writeAndRecord(a.path, a.remote, data, hash, seen);
 			report.downloaded.push(a.path);
 			if (cfg.planOptions.isConfigPath(a.path)) report.configChanged = true;
 			cfg.log(`⚔ 충돌 → 원격 사용: ${a.path}`);
@@ -464,7 +508,7 @@ export class SyncEngine {
 		let copy = conflictPath(a.path, cfg.device, this.now());
 		for (let n = 2; await this.local.stat(copy); n++) copy = conflictPath(a.path, `${cfg.device} ${n}`, this.now());
 		await this.local.rename(a.path, copy);
-		await this.writeAndRecord(a.path, a.remote, data, hash);
+		await this.writeAndRecord(a.path, a.remote, data, hash, undefined);
 		await this.doUpload(copy, undefined, undefined);
 		report.conflicts.push(`${a.path} → ${copy}`);
 		cfg.log(`⚔ 충돌 → 둘 다 보관: ${copy}`);
