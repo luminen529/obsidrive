@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { CachedRemoteStore, RemoteCacheData } from "../src/remoteCache";
-import { Clock, Device, enc, FakeDrive, MemJson } from "./fakes";
+import { Clock, enc, FakeDrive, MemJson } from "./fakes";
 
 let clock: Clock;
 let drive: FakeDrive;
@@ -91,17 +91,5 @@ describe("CachedRemoteStore", () => {
 			await drive.create("b.md", props(), enc("b")); // lands after the listing snapshot
 		};
 		expect(names(await cached().listVault("vault1"))).toEqual(["a.md", "b.md"]);
-	});
-
-	it("an idle sync costs one change-feed request and no listing", async () => {
-		const A = new Device("laptop", drive, clock);
-		for (let i = 0; i < 50; i++) A.fs.put(`n${i}.md`, `c${i}`);
-		await A.sync();
-		const before = { ...drive.calls };
-		const r = await A.sync();
-		expect(r.uploaded.length + r.downloaded.length).toBe(0);
-		expect(drive.calls.list ?? 0).toBe(before.list ?? 0);
-		expect((drive.calls.changes ?? 0) - (before.changes ?? 0)).toBe(1);
-		expect(drive.calls.download ?? 0).toBe(before.download ?? 0);
 	});
 });

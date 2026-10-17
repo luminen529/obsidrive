@@ -59,7 +59,7 @@ describe("DriveClient", () => {
 	});
 
 	it("refreshes the access token once on 401", async () => {
-		const { drive, tokenCalls } = setup((req, n) => (n === 1 ? json(401, { error: { message: "expired" } }) : json(200, { files: [] })));
+		const { drive, tokenCalls } = setup((_req, n) => (n === 1 ? json(401, { error: { message: "expired" } }) : json(200, { files: [] })));
 		await drive.listVault("v");
 		expect(tokenCalls()).toBe(2);
 	});

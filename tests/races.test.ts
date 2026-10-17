@@ -30,7 +30,7 @@ async function expectRemoteHashesValid() {
 }
 
 describe("concurrent edits during a sync", () => {
-	it("[P1] an edit made while a download is in flight is not overwritten", async () => {
+	it("an edit made while a download is in flight is not overwritten", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();
 		await B.sync();
@@ -52,7 +52,7 @@ describe("concurrent edits during a sync", () => {
 		expect([...B.fs.snapshot().values()]).toContain("typing on phone");
 	});
 
-	it("[P1] a remote rename does not overwrite the hash of content changed by another device", async () => {
+	it("a remote rename does not overwrite the hash of content changed by another device", async () => {
 		A.fs.put("img.png", "IMG");
 		await A.sync();
 		await B.sync();
@@ -75,7 +75,7 @@ describe("concurrent edits during a sync", () => {
 		expect(r3.errors).toEqual([]);
 	});
 
-	it("[P1] a remote deletion does not tombstone a newer edit from another device", async () => {
+	it("a remote deletion does not tombstone a newer edit from another device", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();
 		A.fs.files.delete("n.md");
@@ -89,7 +89,7 @@ describe("concurrent edits during a sync", () => {
 		expect(A.fs.get("n.md")).toBe("edited on tablet");
 	});
 
-	it("[P2] a cancelled sync is reported as aborted and not recorded as completed", async () => {
+	it("a cancelled sync is reported as aborted and not recorded as completed", async () => {
 		for (let i = 0; i < 10; i++) A.fs.put(`f${i}.md`, `c${i}`);
 		A.overrides.concurrency = 1;
 		A.overrides.isCancelled = () => (drive.calls.create ?? 0) >= 2;
@@ -105,18 +105,7 @@ describe("concurrent edits during a sync", () => {
 		expect(drive.live().size).toBe(10);
 	});
 
-	it("an idle sync does not rewrite the state or cache files", async () => {
-		A.fs.put("a.md", "x");
-		await A.sync();
-		await A.sync(); // settles any bookkeeping from the first run
-		const saves = A.store.saves;
-		const cacheSaves = A.cache.saves;
-		await A.sync();
-		expect(A.store.saves).toBe(saves);
-		expect(A.cache.saves).toBe(cacheSaves);
-	});
-
-	it("[P1] re-creating a deleted path does not overwrite a tombstone another device just restored", async () => {
+	it("re-creating a deleted path does not overwrite a tombstone another device just restored", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();
 		A.fs.files.delete("n.md");
@@ -137,7 +126,7 @@ describe("concurrent edits during a sync", () => {
 		expect(new Set(A.fs.snapshot().values())).toEqual(new Set(["restored on tablet", "re-created on laptop"]));
 	});
 
-	it("[P1] purging an expired tombstone never deletes a file another device just restored", async () => {
+	it("purging an expired tombstone never deletes a file another device just restored", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();
 		await B.sync();
@@ -161,7 +150,7 @@ describe("concurrent edits during a sync", () => {
 		expect(A.fs.get("n.md")).toBe("restored on tablet");
 	});
 
-	it("[P1] a user save right after a download is not recorded as already synced", async () => {
+	it("a user save right after a download is not recorded as already synced", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();
 		await B.sync();
@@ -209,7 +198,7 @@ describe("concurrent edits during a sync", () => {
 		expect(B.fs.get("img.png")).toBe("PNG2");
 	});
 
-	it("[P1] duplicate cleanup never deletes a copy another device just renamed into its own file", async () => {
+	it("duplicate cleanup never deletes a copy another device just renamed into its own file", async () => {
 		// Two identical "n.md" files exist remotely (both devices created it at once).
 		const data = enc("same");
 		const props = { ov: "vault1", oh: await sha256Hex(data), om: "1" };
@@ -230,7 +219,7 @@ describe("concurrent edits during a sync", () => {
 		expect(A.fs.get("n.md")).toBe("same");
 	});
 
-	it("[P1] a remote deletion does not tombstone a file another device just renamed", async () => {
+	it("a remote deletion does not tombstone a file another device just renamed", async () => {
 		A.fs.put("n.md", "content");
 		await A.sync();
 		A.fs.files.delete("n.md");
@@ -246,7 +235,7 @@ describe("concurrent edits during a sync", () => {
 		expect(A.fs.get("moved.md")).toBe("content");
 	});
 
-	it("[P1] a remote rename is skipped if another device renamed the file first", async () => {
+	it("a remote rename is skipped if another device renamed the file first", async () => {
 		A.fs.put("a.png", "IMG");
 		await A.sync();
 		const f = A.fs.files.get("a.png")!;
@@ -271,15 +260,5 @@ describe("concurrent edits during a sync", () => {
 		const r = await B.sync();
 		expect(r.downloaded).toEqual(["n.md"]);
 		expect(B.fs.get("n.md")).toBe("\uFEFFv2\r\n");
-	});
-
-	it("downloaded content always matches its recorded hash", async () => {
-		A.fs.put("n.md", "v1");
-		await A.sync();
-		await B.sync();
-		await editRemotely("n.md", "v2");
-		await B.sync();
-		expect(B.fs.get("n.md")).toBe("v2");
-		expect(dec(B.fs.files.get("n.md")!.data)).toBe("v2");
 	});
 });

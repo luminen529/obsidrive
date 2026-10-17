@@ -69,14 +69,6 @@ export class FakeVault {
 		this.files.set(path, { data: enc(content), mtime: this.tick() });
 		this.onEvent?.([path]);
 	}
-	/** The user moves a file. */
-	userRename(from: string, to: string) {
-		const e = this.files.get(from)!;
-		this.files.delete(from);
-		this.files.set(to, e);
-		this.onEvent?.([to, from]);
-	}
-
 	private set(path: string, data: ArrayBuffer, mtime?: number) {
 		this.files.set(path, { data: data.slice(0), mtime: mtime ?? this.tick() });
 	}

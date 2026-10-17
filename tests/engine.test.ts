@@ -32,14 +32,23 @@ describe("two-device sync", () => {
 		expect(r.downloaded).toEqual(["a.md"]);
 	});
 
-	it("a second sync with no changes does nothing", async () => {
-		A.fs.put("a.md", "x");
+	it("an idle sync transfers, lists and writes nothing", async () => {
+		for (let i = 0; i < 20; i++) A.fs.put(`n${i}.md`, `c${i}`);
 		await A.sync();
-		const before = { ...drive.calls };
+		await A.sync(); // settles bookkeeping from the first run
+		const calls = { ...drive.calls };
+		const saves = A.store.saves;
+		const cacheSaves = A.cache.saves;
 		const r = await A.sync();
 		expect(r.uploaded.length + r.downloaded.length + r.deletedLocal.length + r.deletedRemote.length).toBe(0);
-		expect(drive.calls.download ?? 0).toBe(before.download ?? 0);
-		expect(drive.calls.updateContent ?? 0).toBe(before.updateContent ?? 0);
+		// One change-feed request, no full listing, no transfers or remote writes.
+		expect((drive.calls.changes ?? 0) - (calls.changes ?? 0)).toBe(1);
+		for (const k of ["list", "download", "create", "updateContent", "updateMeta", "remove"]) {
+			expect(drive.calls[k] ?? 0).toBe(calls[k] ?? 0);
+		}
+		// No disk writes for the state file or the remote cache.
+		expect(A.store.saves).toBe(saves);
+		expect(A.cache.saves).toBe(cacheSaves);
 	});
 
 	it("propagates deletions via tombstones and keeps the content remotely", async () => {

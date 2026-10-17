@@ -24,7 +24,7 @@ describe("OwnWriteTracker", () => {
 		expect(changes()).toBe(0);
 	});
 
-	it("[P2] a user save during the write is reported once the write settles", () => {
+	it("a user save during the write is reported once the write settles", () => {
 		const { t, disk, changes } = setup();
 		t.begin(["n.md"]);
 		disk.set("n.md", file(200, 9)); // the user saved while our write was in flight
@@ -71,7 +71,7 @@ describe("OwnWriteTracker", () => {
 		expect(changes()).toBe(1);
 	});
 
-	it("[P2] a user move during our delete is reported for the path we never touched", () => {
+	it("a user move during our delete is reported for the path we never touched", () => {
 		const { t, disk, changes } = setup();
 		disk.set("a.md", file(1, 1));
 		t.begin(["a.md"]); // we are deleting a.md

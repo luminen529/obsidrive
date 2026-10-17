@@ -53,7 +53,7 @@ describe("own-write detection through ObsidianLocalFs", () => {
 		expect(changes).toBe(0);
 	});
 
-	it("[P2] a same-size user save right after replaceText still triggers a sync", async () => {
+	it("a same-size user save right after replaceText still triggers a sync", async () => {
 		vault.userWrite("n.md", "abc");
 		changes = 0;
 		vault.afterProcess = (path) => {

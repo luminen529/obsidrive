@@ -17,9 +17,9 @@ export class PathFilter {
 	private configPrefix: string;
 
 	constructor(
-		private configDir: string,
+		configDir: string,
 		private s: ObsiDriveSettings,
-		private ownPluginId: string,
+		ownPluginId: string,
 	) {
 		this.configPrefix = `${configDir}/`;
 		this.ignore = splitList(s.ignorePatterns.replace(/,/g, "\n"))
