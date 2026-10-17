@@ -69,6 +69,16 @@ Obsidian 시작 시, 주기적으로(기본 5분), 편집이 멈춘 뒤(기본 3
 
 ## 설치
 
+### BRAT으로 설치 (권장, 모바일 포함)
+
+1. 커뮤니티 플러그인에서 **BRAT**(Obsidian42 - BRAT)를 설치하고 켭니다.
+2. BRAT 설정에서 **Add beta plugin**을 누르고 `luminen529/obsidrive`를 입력합니다.
+3. 커뮤니티 플러그인 목록에서 **ObsiDrive**를 켭니다.
+
+새 버전은 [Releases](https://github.com/luminen529/obsidrive/releases)에 올라가고, BRAT이 자동으로 업데이트합니다.
+
+### 직접 빌드
+
 1. 빌드합니다.
    ```bash
    npm install
@@ -77,8 +87,11 @@ Obsidian 시작 시, 주기적으로(기본 5분), 편집이 멈춘 뒤(기본 3
    npm run build
    ```
 2. `main.js`, `manifest.json`, `styles.css`를 볼트의 `.obsidian/plugins/obsidrive/` 폴더에 복사하고, 커뮤니티 플러그인에서 켭니다.
-3. Google Cloud에서 Google Drive API를 켜고 **데스크톱 앱** 유형의 OAuth 클라이언트를 만든 뒤, 플러그인 설정에 Client ID와 Client Secret을 넣고 로그인합니다.
-   모바일에서는 브라우저에서 허용한 뒤 주소창의 리디렉션 URL을 복사해 붙여넣는 방식으로 로그인합니다.
+
+### Google Drive 연결
+
+Google Cloud에서 Google Drive API를 켜고 **데스크톱 앱** 유형의 OAuth 클라이언트를 만든 뒤, 플러그인 설정에 Client ID와 Client Secret을 넣고 로그인합니다.
+모바일에서는 브라우저에서 허용한 뒤 주소창의 리디렉션 URL을 복사해 붙여넣는 방식으로 로그인합니다.
 
 ## 참고
 
