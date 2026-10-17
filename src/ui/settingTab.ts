@@ -30,6 +30,18 @@ export class ObsiDriveSettingTab extends PluginSettingTab {
 		this.refreshDomState();
 	}
 
+	private syncStatusText(): string {
+		const p = this.plugin;
+		if (p.isSyncing()) return "동기화 중입니다…";
+		if (p.needsFirstSync()) {
+			return `첫 동기화가 필요합니다. 아래 원격 볼트 이름("${p.settings.remoteVaultName}")이 다른 기기와 같은지 확인한 뒤 누르세요. 그 전에는 자동 동기화가 돌지 않습니다.`;
+		}
+		const last = p.lastSyncAt ? `마지막 동기화: ${new Date(p.lastSyncAt).toLocaleString()}` : "아직 동기화하지 않았습니다.";
+		const r = p.lastReport;
+		const tail = r?.aborted ? ` · 중단됨: ${r.aborted}` : r?.errors.length ? ` · 오류 ${r.errors.length}건 (로그 확인)` : "";
+		return `${last}${tail}`;
+	}
+
 	getSettingDefinitions(): SettingDefinitionItem<Key>[] {
 		const p = this.plugin;
 		const connected = () => p.isConnected();
@@ -81,6 +93,33 @@ export class ObsiDriveSettingTab extends PluginSettingTab {
 									b.onClick(() => void p.loginManual());
 								});
 							}
+						},
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "동기화",
+				visible: () => connected(),
+				items: [
+					{
+						name: "지금 동기화",
+						desc: this.syncStatusText(),
+						render: (setting) => {
+							setting.addButton((b) => {
+								b.setButtonText(p.isSyncing() ? "동기화 중…" : "지금 동기화")
+									.setCta()
+									.setDisabled(p.isSyncing())
+									.onClick(async () => {
+										b.setDisabled(true).setButtonText("동기화 중…");
+										try {
+											await p.syncNow();
+										} finally {
+											this.update();
+										}
+									});
+							});
+							setting.addButton((b) => b.setButtonText("미리보기").onClick(() => void p.dryRun()));
 						},
 					},
 				],

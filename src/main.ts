@@ -58,12 +58,15 @@ export default class ObsiDrivePlugin extends Plugin {
 	logLines: string[] = [];
 	lastReport: SyncReport | null = null;
 	lastSyncAt = 0;
+	private vaultKeyCache = { name: "", key: "" };
+	private firstSyncNoticeFor = "";
 	status: Status = { kind: "idle" };
 
 	private debouncedSync = debounce(() => void this.autoSync("변경 감지"), 30_000, true);
 
 	async onload() {
 		await this.loadSettings();
+		await this.restoreSyncInfo();
 
 		this.tokens = new TokenProvider(
 			this.http,
@@ -152,13 +155,32 @@ export default class ObsiDrivePlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		await this.vaultKey(); // keep the cache used by needsFirstSync() current
 		this.restartScheduler();
 		this.updateStatus();
+	}
+
+	private stateStore() {
+		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+		return new FileStateStore(this.app, `${pluginDir}/sync-state.json`);
+	}
+
+	/** Picks up the last sync time and treats an existing sync state as a completed first sync. */
+	private async restoreSyncInfo() {
+		const key = await this.vaultKey();
+		const state = await this.stateStore().load();
+		if (!state || state.vaultKey !== key || !state.lastSync) return;
+		this.lastSyncAt = state.lastSync;
+		if (this.settings.syncedVaultKey !== key) {
+			this.settings.syncedVaultKey = key;
+			await this.saveData(this.settings);
+		}
 	}
 
 	/** Called by Obsidian when data.json changed on disk (e.g. another sync tool). */
 	async onExternalSettingsChange() {
 		await this.loadSettings();
+		await this.restoreSyncInfo();
 		this.restartScheduler();
 	}
 
@@ -259,6 +281,7 @@ export default class ObsiDrivePlugin extends Plugin {
 			await this.saveSettings();
 			new Notice(`✅ Google Drive 연결됨${this.settings.accountEmail ? `: ${this.settings.accountEmail}` : ""}`);
 			this.refreshSettingTab();
+			if (this.needsFirstSync()) this.showFirstSyncNotice();
 		} catch (e) {
 			new Notice(`로그인 실패: ${errorMessage(e)}`, 10000);
 			throw e;
@@ -277,13 +300,56 @@ export default class ObsiDrivePlugin extends Plugin {
 	}
 
 	refreshSettingTab() {
-		this.settingTab?.update();
+		// Only re-render while the tab is actually on screen.
+		if (this.settingTab?.containerEl.isConnected) this.settingTab.update();
+	}
+
+	isSyncing(): boolean {
+		return this.syncing !== null;
+	}
+
+	/** True when this device has not yet done the manual first sync with the current remote vault. */
+	needsFirstSync(): boolean {
+		const name = this.settings.remoteVaultName.trim();
+		if (this.vaultKeyCache.name !== name) return false; // not computed yet
+		return this.settings.syncedVaultKey !== this.vaultKeyCache.key;
+	}
+
+	private showFirstSyncNotice() {
+		const notice = new Notice(
+			createFragment((f) => {
+				f.createEl("div", { text: "ObsiDrive: 첫 동기화를 직접 시작해야 자동 동기화가 켜집니다." });
+				f.createEl("div", {
+					text: `원격 볼트 이름 "${this.settings.remoteVaultName}"이(가) 다른 기기와 같은지 확인한 뒤 눌러주세요.`,
+				});
+				const row = f.createDiv({ cls: "obsidrive-notice-actions" });
+				const go = row.createEl("button", { text: "지금 동기화", cls: "mod-cta" });
+				go.onclick = (e) => {
+					e.stopPropagation();
+					notice.hide();
+					void this.syncNow();
+				};
+				const settings = row.createEl("button", { text: "설정 열기" });
+				settings.onclick = (e) => {
+					e.stopPropagation();
+					notice.hide();
+					const setting = (this.app as any).setting;
+					setting?.open?.();
+					setting?.openTabById?.(this.manifest.id);
+				};
+			}),
+			0,
+		);
 	}
 
 	// ---------- sync ----------
 
 	async vaultKey(): Promise<string> {
-		return (await sha256OfString(`obsidrive:${this.settings.remoteVaultName.trim()}`)).slice(0, 24);
+		const name = this.settings.remoteVaultName.trim();
+		if (this.vaultKeyCache.name !== name) {
+			this.vaultKeyCache = { name, key: (await sha256OfString(`obsidrive:${name}`)).slice(0, 24) };
+		}
+		return this.vaultKeyCache.key;
 	}
 
 	private onVaultChange(file: TAbstractFile, oldPath?: string) {
@@ -314,8 +380,14 @@ export default class ObsiDrivePlugin extends Plugin {
 		if (this.settings.paused || !this.isConnected() || this.syncing) return;
 		// The first sync with a remote vault must be started by hand (after checking
 		// the remote vault name), so a new device never syncs before it is set up.
-		if (this.settings.syncedVaultKey !== (await this.vaultKey())) {
+		const key = await this.vaultKey();
+		if (this.settings.syncedVaultKey !== key) {
 			this.setStatus({ kind: "paused", text: "첫 동기화는 '지금 동기화'로" });
+			// Once per session and remote vault, so the interval timer does not spam.
+			if (this.firstSyncNoticeFor !== key) {
+				this.firstSyncNoticeFor = key;
+				this.showFirstSyncNotice();
+			}
 			return;
 		}
 		if (!navigator.onLine) {
@@ -370,8 +442,7 @@ export default class ObsiDrivePlugin extends Plugin {
 		const localFs = new ObsidianLocalFs(this.app, filter);
 		this.localFs = localFs;
 		const vaultKey = await this.vaultKey();
-		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
-		const store = new FileStateStore(this.app, `${pluginDir}/sync-state.json`);
+		const store = this.stateStore();
 
 		const engine = new SyncEngine(localFs, this.drive, store, {
 			vaultKey,
@@ -426,6 +497,7 @@ export default class ObsiDrivePlugin extends Plugin {
 				await this.saveData(s);
 			}
 			this.afterSync(report, opts.interactive);
+			this.refreshSettingTab();
 			return report;
 		} catch (e) {
 			const report = (e as { report?: SyncReport }).report ?? null;
@@ -532,6 +604,9 @@ export default class ObsiDrivePlugin extends Plugin {
 			const markers = (await this.drive.listVaultMarkers()).filter((m) => m.appProperties["ov"] === vaultKey);
 			for (const f of [...files, ...markers]) await this.drive.remove(f.id);
 			await this.resetSyncState(false);
+			// The remote is empty now: the next sync must again be started by hand.
+			this.settings.syncedVaultKey = "";
+			await this.saveSettings();
 			new Notice(`원격 파일 ${files.length}개를 삭제했습니다.`);
 		} catch (e) {
 			new Notice(`삭제 실패: ${errorMessage(e)}`);
@@ -539,8 +614,7 @@ export default class ObsiDrivePlugin extends Plugin {
 	}
 
 	async resetSyncState(notify = true) {
-		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
-		await new FileStateStore(this.app, `${pluginDir}/sync-state.json`).clear();
+		await this.stateStore().clear();
 		if (notify) new Notice("동기화 기준 상태를 초기화했습니다. 다음 동기화에서 전체 비교를 수행합니다.");
 	}
 
