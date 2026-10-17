@@ -17,7 +17,11 @@
 2. **API 및 서비스 → 라이브러리**에서 **Google Drive API**를 검색해 **사용**을 누릅니다.
 3. **Google 인증 플랫폼(OAuth 동의 화면)** 을 설정합니다.
    - 사용자 유형: **외부(External)**
-   - 앱 이름 / 지원 이메일 / 개발자 연락처: 본인 정보
+   - **브랜딩**: 앱 이름, 사용자 지원 이메일, 개발자 연락처는 본인 정보로 채웁니다. **앱 로고는 올리지 마세요**(로고를 올리면 브랜드 인증이 필요해집니다).
+     외부 프로덕션 앱은 링크가 필수이므로 아래를 넣습니다.
+     - 애플리케이션 홈페이지: <https://luminen529.github.io/obsidrive/>
+     - 개인정보처리방침: <https://luminen529.github.io/obsidrive/privacy.html>
+     - 승인된 도메인: `luminen529.github.io`
    - **데이터 액세스(범위)**: `https://www.googleapis.com/auth/drive.appdata` 추가 (민감하지 않은 범위)
    - **대상(Audience)**: **앱 게시(Publish app)** 를 눌러 상태를 **프로덕션**으로 바꾸세요.
      ⚠️ "테스트" 상태로 두면 refresh token이 **7일 뒤 만료**되어 매주 다시 로그인해야 합니다.

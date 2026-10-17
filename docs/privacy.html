@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>ObsiDrive Privacy Policy</title>
+	<meta name="description" content="Privacy policy for the ObsiDrive Obsidian plugin.">
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+	<h1>개인정보처리방침</h1>
+	<p class="lead">ObsiDrive Privacy Policy · 시행일 / Effective date: 2026-10-17</p>
+	<nav><a href="index.html">← ObsiDrive</a></nav>
+
+	<h2>1. 접근하는 데이터 <span class="en">/ Data accessed</span></h2>
+	<p>ObsiDrive는 Google 권한 <code>https://www.googleapis.com/auth/drive.appdata</code> 하나만 요청합니다. 이 권한으로는 ObsiDrive가 사용자의 Google Drive 숨김 앱 데이터 폴더(<code>appDataFolder</code>)에 직접 만든 파일만 읽고 쓸 수 있습니다. 사용자의 다른 Drive 파일, Gmail, 연락처 등 그 밖의 Google 데이터에는 접근하지 않습니다.</p>
+	<p class="en">ObsiDrive requests a single Google OAuth scope, <code>https://www.googleapis.com/auth/drive.appdata</code>. It can only read and write files that ObsiDrive itself created in the hidden application data folder (<code>appDataFolder</code>) of the user's Google Drive. It does not access any other Drive files, Gmail, contacts, or other Google data.</p>
+	<p>선택적으로, 연결된 계정을 표시하고 저장 용량을 보여주기 위해 Drive <code>about</code> 정보(계정 이메일 주소, 저장 용량 사용량)를 조회할 수 있습니다. 이 정보는 사용자의 기기 안에만 저장됩니다.</p>
+	<p class="en">Optionally, the plugin reads Drive <code>about</code> information (account email address and storage usage) to display the connected account and quota. This information is stored only on the user's device.</p>
+
+	<h2>2. 데이터 사용 목적 <span class="en">/ How data is used</span></h2>
+	<p>사용자의 Obsidian 볼트 파일(노트, 첨부파일, 설정, 플러그인)을 사용자 본인의 기기들 사이에서 동기화하는 목적으로만 사용합니다. 광고, 분석, 프로파일링, AI 학습 등 다른 목적으로는 사용하지 않습니다.</p>
+	<p class="en">Data is used solely to synchronize the user's Obsidian vault files (notes, attachments, settings, plugins) between the user's own devices. It is not used for advertising, analytics, profiling, AI/ML model training, or any other purpose.</p>
+
+	<h2>3. 저장 위치와 공유 <span class="en">/ Storage and sharing</span></h2>
+	<ul>
+		<li>동기화되는 파일은 사용자 본인의 Google Drive(<code>appDataFolder</code>)와 사용자 본인의 기기에만 저장됩니다.<br>
+			<span class="en">Synced files are stored only in the user's own Google Drive (<code>appDataFolder</code>) and on the user's own devices.</span></li>
+		<li>ObsiDrive에는 개발자가 운영하는 서버가 없으며, 어떤 데이터도 개발자나 제3자에게 전송·판매·공유하지 않습니다.<br>
+			<span class="en">ObsiDrive has no developer-operated server. No data is transmitted, sold, or shared with the developer or any third party.</span></li>
+		<li>OAuth 인증 정보(refresh token, client secret)는 사용자의 기기에서 Obsidian Secret Storage(운영체제 키체인)에 저장됩니다.<br>
+			<span class="en">OAuth credentials (refresh token, client secret) are kept on the user's device in Obsidian Secret Storage (the operating system keychain).</span></li>
+	</ul>
+
+	<h2>4. Google API 서비스 사용자 데이터 정책 <span class="en">/ Google API Services User Data Policy</span></h2>
+	<p class="en">ObsiDrive's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+	<p>ObsiDrive가 Google API에서 받은 정보를 사용하거나 다른 앱으로 전송하는 방식은 제한적 사용(Limited Use) 요건을 포함한 Google API 서비스 사용자 데이터 정책을 따릅니다.</p>
+
+	<h2>5. 데이터 삭제와 권한 철회 <span class="en">/ Deletion and revocation</span></h2>
+	<ul>
+		<li>플러그인 설정의 <b>연결 해제</b>는 Google 토큰을 철회하고 기기에서 삭제합니다.<br>
+			<span class="en"><b>Disconnect</b> in the plugin settings revokes the Google token and removes it from the device.</span></li>
+		<li>플러그인 설정의 <b>원격 데이터 삭제</b>는 Drive에 저장된 해당 볼트 데이터를 영구 삭제합니다.<br>
+			<span class="en"><b>Delete remote data</b> in the plugin settings permanently deletes that vault's data from Drive.</span></li>
+		<li>언제든 <a href="https://myaccount.google.com/permissions">Google 계정 → 타사 액세스</a>에서 권한을 철회할 수 있고, Google Drive 설정 → 앱 관리에서 숨겨진 앱 데이터를 삭제할 수 있습니다.<br>
+			<span class="en">You can revoke access at any time at <a href="https://myaccount.google.com/permissions">Google Account → Third-party access</a>, and delete hidden app data in Google Drive Settings → Manage apps.</span></li>
+	</ul>
+
+	<h2>6. 변경 <span class="en">/ Changes</span></h2>
+	<p>이 방침이 바뀌면 이 페이지를 갱신하고 시행일을 변경합니다.<br>
+		<span class="en">If this policy changes, this page will be updated along with its effective date.</span></p>
+
+	<footer>
+		문의 / Contact: <a href="https://github.com/luminen529/obsidrive/issues">GitHub Issues</a>
+	</footer>
+</main>
+</body>
+</html>

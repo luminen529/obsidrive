@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>ObsiDrive</title>
+	<meta name="description" content="Personal Obsidian plugin that syncs a vault to a hidden app folder in the user's own Google Drive.">
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+	<h1>ObsiDrive</h1>
+	<p class="lead">Obsidian 볼트를 본인 Google Drive의 숨김 앱 폴더로 동기화하는 개인용 플러그인<br>
+		<span class="en">A personal Obsidian plugin that syncs a vault to a hidden app folder in your own Google Drive.</span></p>
+
+	<nav>
+		<a href="https://github.com/luminen529/obsidrive">소스 코드 / Source code</a>
+		<a href="privacy.html">개인정보처리방침 / Privacy Policy</a>
+	</nav>
+
+	<h2>무엇을 하나요? <span class="en">/ What it does</span></h2>
+	<ul>
+		<li>노트·첨부파일, Obsidian 설정, 테마, CSS 스니펫, 커뮤니티 플러그인을 여러 기기 사이에서 동기화합니다.<br>
+			<span class="en">Syncs notes, attachments, Obsidian settings, themes, CSS snippets and community plugins across devices.</span></li>
+		<li>데이터는 Google Drive의 숨김 <code>appDataFolder</code>에만 저장되어 Drive 화면에 보이지 않습니다.<br>
+			<span class="en">Data is stored only in Google Drive's hidden <code>appDataFolder</code> and does not appear in your Drive.</span></li>
+		<li>Google 권한은 <code>drive.appdata</code> 하나만 요청합니다. Drive의 다른 파일은 읽거나 쓸 수 없습니다.<br>
+			<span class="en">It requests a single Google scope, <code>drive.appdata</code>, and cannot read or modify any other Drive files.</span></li>
+		<li>중간 서버가 없습니다. 플러그인이 Google API와 직접 통신합니다.<br>
+			<span class="en">There is no intermediary server; the plugin talks to Google APIs directly.</span></li>
+	</ul>
+
+	<div class="card">
+		이 앱은 개발자 본인의 개인 사용을 위한 것입니다. 각 사용자는 직접 만든 Google Cloud OAuth 클라이언트로 사용합니다.<br>
+		<span class="en">This app is intended for the developer's personal use. Each user runs it with their own Google Cloud OAuth client.</span>
+	</div>
+
+	<footer>
+		문의 / Contact: <a href="https://github.com/luminen529/obsidrive/issues">GitHub Issues</a>
+	</footer>
+</main>
+</body>
+</html>
