@@ -4,6 +4,7 @@
   "version": "0.3.0",
   "minAppVersion": "1.13.2",
   "description": "Sync your vault, settings and plugins to a hidden app folder in your own Google Drive.",
-  "author": "kanghyun",
-  "isDesktopOnly": false
+  "author": "luminen529",
+  "isDesktopOnly": false,
+  "authorUrl": "https://github.com/luminen529"
 }
