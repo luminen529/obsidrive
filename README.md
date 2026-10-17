@@ -124,6 +124,9 @@ ObsiDrive는 중간 서버 없이 **내 Google Cloud 프로젝트의 OAuth 클�
 
 다른 기기에서 바뀐 설정이나 플러그인이 내려오면, **다시 로드** 버튼이 있는 알림으로 알려드려요.
 
+> [!TIP]
+> **모바일 데이터도 아껴요.** 원격 파일 목록을 기기에 저장해 두고, 동기화할 때는 Google Drive 변경 기록에서 **바뀐 부분만** 받아옵니다. 바뀐 게 없으면 동기화 한 번에 작은 요청 하나(수백 바이트)면 충분해요. 하루에 한 번은 전체 목록을 다시 받아 혹시 모를 어긋남을 바로잡습니다.
+
 ---
 
 ## 🛡️ 내 노트는 안전한가요?
@@ -219,7 +222,8 @@ npm test
 |---|---|
 | `src/sync/planner.ts` | 순수 3-way 계획 함수 (I/O 없음) |
 | `src/sync/engine.ts` | 실행과 안전장치 (LocalFs / RemoteStore / StateStore 인터페이스) |
-| `src/drive.ts` | Drive v3 클라이언트 (appDataFolder, multipart/resumable 업로드, 재시도) |
+| `src/drive.ts` | Drive v3 클라이언트 (appDataFolder, multipart/resumable 업로드, 변경 기록, 재시도) |
+| `src/remoteCache.ts` | 원격 목록 캐시 + 변경분만 받아오기 |
 | `src/auth.ts` | OAuth PKCE (데스크톱 루프백 / 수동 붙여넣기) |
 | `src/obsidianFs.ts` | Obsidian Vault/Adapter 연동 |
 | `src/filter.ts` | 동기화 대상 판정 |

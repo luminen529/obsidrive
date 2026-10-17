@@ -13,7 +13,8 @@ import {
 import { DriveClient } from "./drive";
 import { PathFilter } from "./filter";
 import { AuthError, HttpFn, lowerKeys } from "./http";
-import { FileStateStore, ObsidianLocalFs } from "./obsidianFs";
+import { FileStateStore, JsonFileStore, ObsidianLocalFs } from "./obsidianFs";
+import { CachedRemoteStore, RemoteCacheData } from "./remoteCache";
 import { DEFAULT_SETTINGS, ObsiDriveSettings } from "./settings";
 import { SyncEngine, toRemoteEntry } from "./sync/engine";
 import type { RemoteEntry, SyncReport } from "./sync/types";
@@ -23,6 +24,8 @@ import { conflictPath, errorMessage, randomString, sha256OfString } from "./util
 
 const PKCE_STORAGE_KEY = "obsidrive-pkce";
 const MAX_LOG_LINES = 1000;
+/** Even with the change feed, re-download the full remote listing this often to self-heal. */
+const FULL_LISTING_INTERVAL_MS = 24 * 60 * 60_000;
 
 type Status = { kind: "idle" | "syncing" | "error" | "offline" | "paused" | "disconnected"; text?: string };
 
@@ -160,9 +163,16 @@ export default class ObsiDrivePlugin extends Plugin {
 		this.updateStatus();
 	}
 
+	private pluginDir() {
+		return this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+	}
+
 	private stateStore() {
-		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
-		return new FileStateStore(this.app, `${pluginDir}/sync-state.json`);
+		return new FileStateStore(this.app, `${this.pluginDir()}/sync-state.json`);
+	}
+
+	private remoteCacheStore() {
+		return new JsonFileStore<RemoteCacheData>(this.app, `${this.pluginDir()}/remote-cache.json`);
 	}
 
 	/** Picks up the last sync time and treats an existing sync state as a completed first sync. */
@@ -293,6 +303,7 @@ export default class ObsiDrivePlugin extends Plugin {
 		if (token) await revokeToken(this.http, token).catch(() => {});
 		if (this.settings.tokenSecretId) this.app.secretStorage.setSecret(this.settings.tokenSecretId, "");
 		this.tokens.clear();
+		await this.remoteCacheStore().clear();
 		this.settings.accountEmail = "";
 		await this.saveSettings();
 		new Notice("Google Drive 연결 해제됨");
@@ -443,8 +454,14 @@ export default class ObsiDrivePlugin extends Plugin {
 		this.localFs = localFs;
 		const vaultKey = await this.vaultKey();
 		const store = this.stateStore();
+		const remote = new CachedRemoteStore(
+			this.drive,
+			this.remoteCacheStore(),
+			`${s.clientId.trim()}|${s.accountEmail}|${vaultKey}`,
+			{ fullRefreshMs: FULL_LISTING_INTERVAL_MS, log: (m) => this.log(m) },
+		);
 
-		const engine = new SyncEngine(localFs, this.drive, store, {
+		const engine = new SyncEngine(localFs, remote, store, {
 			vaultKey,
 			device: s.deviceName || "device",
 			planOptions: {
@@ -615,6 +632,7 @@ export default class ObsiDrivePlugin extends Plugin {
 
 	async resetSyncState(notify = true) {
 		await this.stateStore().clear();
+		await this.remoteCacheStore().clear();
 		if (notify) new Notice("동기화 기준 상태를 초기화했습니다. 다음 동기화에서 전체 비교를 수행합니다.");
 	}
 

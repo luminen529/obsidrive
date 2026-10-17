@@ -152,30 +152,30 @@ export class ObsidianLocalFs implements LocalFs {
 }
 
 /**
- * Stores the sync base state next to the plugin. Written twice (tmp first) so
- * a crash mid-write always leaves one complete copy behind.
+ * A JSON file next to the plugin (sync state, remote listing cache). Written
+ * twice (tmp first) so a crash mid-write always leaves one complete copy behind.
  */
-export class FileStateStore implements StateStore {
+export class JsonFileStore<T> {
 	constructor(
 		private app: App,
 		private path: string,
 	) {}
 
-	private async readJson(path: string): Promise<SyncState | null> {
+	private async readJson(path: string): Promise<T | null> {
 		try {
 			if (!(await this.app.vault.adapter.exists(path))) return null;
-			return JSON.parse(await this.app.vault.adapter.read(path)) as SyncState;
+			return JSON.parse(await this.app.vault.adapter.read(path)) as T;
 		} catch {
 			return null;
 		}
 	}
 
-	async load(): Promise<SyncState | null> {
+	async load(): Promise<T | null> {
 		return (await this.readJson(this.path)) ?? (await this.readJson(`${this.path}.tmp`));
 	}
 
-	async save(state: SyncState): Promise<void> {
-		const json = JSON.stringify(state);
+	async save(value: T): Promise<void> {
+		const json = JSON.stringify(value);
 		await this.app.vault.adapter.write(`${this.path}.tmp`, json);
 		await this.app.vault.adapter.write(this.path, json);
 	}
@@ -186,3 +186,5 @@ export class FileStateStore implements StateStore {
 		}
 	}
 }
+
+export class FileStateStore extends JsonFileStore<SyncState> implements StateStore {}

@@ -2,7 +2,8 @@ node_modules/
 main.js
 *.map
 data.json
-sync-state.json
+sync-state.json*
+remote-cache.json*
 
 # Personal notes (not tracked)
 /docs.md

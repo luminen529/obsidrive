@@ -137,7 +137,7 @@ describe("two-device sync", () => {
 	it("an emptied remote does not wipe the local vault silently", async () => {
 		for (let i = 0; i < 10; i++) A.fs.put(`f${i}.md`, `c${i}`);
 		await A.sync();
-		drive.files.clear();
+		drive.wipe();
 		A.confirm = async () => false;
 		const r = await A.sync();
 		expect(r.aborted).toBeDefined();

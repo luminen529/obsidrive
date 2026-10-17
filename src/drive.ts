@@ -32,6 +32,13 @@ export interface RemoteFile {
 
 export type AppProps = Record<string, string | null>;
 
+export interface RemoteChange {
+	fileId: string;
+	/** Deleted or trashed. */
+	removed: boolean;
+	file?: RemoteFile;
+}
+
 function toRemote(f: any): RemoteFile {
 	return {
 		id: f.id,
@@ -155,6 +162,38 @@ export class DriveClient {
 		);
 		if (existing.length > 0) return;
 		await this.create(`.obsidrive-vault/${vaultName}`, { [PROP_KIND]: "vault", [PROP_VAULT]: vaultKey }, new ArrayBuffer(0));
+	}
+
+	/** Token marking "now" in the change feed; changes after it can be fetched with listChanges(). */
+	async getStartPageToken(): Promise<string> {
+		const res = await this.call(`${API}/changes/startPageToken?fields=startPageToken`);
+		return res.json().startPageToken;
+	}
+
+	/** Every change in the appDataFolder since `pageToken` (all pages), plus the token to resume from. */
+	async listChanges(pageToken: string): Promise<{ changes: RemoteChange[]; newStartPageToken: string }> {
+		const changes: RemoteChange[] = [];
+		let token = pageToken;
+		for (;;) {
+			const params = new URLSearchParams({
+				pageToken: token,
+				spaces: "appDataFolder",
+				includeRemoved: "true",
+				pageSize: "1000",
+				fields: `nextPageToken,newStartPageToken,changes(fileId,removed,file(${FILE_FIELDS},trashed))`,
+			});
+			const body = (await this.call(`${API}/changes?${params.toString()}`)).json();
+			for (const c of body.changes ?? []) {
+				changes.push({
+					fileId: c.fileId,
+					removed: !!c.removed || !!c.file?.trashed,
+					file: c.file ? toRemote(c.file) : undefined,
+				});
+			}
+			if (body.newStartPageToken) return { changes, newStartPageToken: body.newStartPageToken };
+			if (!body.nextPageToken) throw new HttpError("changes.list: 다음 페이지 토큰 없음", 500);
+			token = body.nextPageToken;
+		}
 	}
 
 	async getMeta(id: string): Promise<RemoteFile | null> {

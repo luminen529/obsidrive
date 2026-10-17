@@ -1,6 +1,8 @@
 // In-memory stand-ins for the vault, Google Drive and the state file.
 
-import type { AppProps, RemoteFile } from "../src/drive";
+import type { AppProps, RemoteChange, RemoteFile } from "../src/drive";
+import { HttpError } from "../src/http";
+import { CachedRemoteStore, JsonStore, RemoteCacheData } from "../src/remoteCache";
 import { EngineConfig, LocalFs, RemoteStore, StateStore, SyncEngine } from "../src/sync/engine";
 import type { SyncReport, SyncState } from "../src/sync/types";
 
@@ -26,8 +28,34 @@ interface StoredRemote {
 export class FakeDrive implements RemoteStore {
 	files = new Map<string, StoredRemote>();
 	calls: Record<string, number> = {};
+	/** Change feed: one entry per mutation; a page token is an index into it. */
+	log: RemoteChange[] = [];
+	/** Tokens below this are rejected, like an expired Drive page token. */
+	minValidToken = 0;
 	private seq = 0;
 	constructor(private clock: Clock) {}
+
+	private record(id: string) {
+		const f = this.files.get(id);
+		this.log.push({ fileId: id, removed: !f, file: f ? this.view(f) : undefined });
+	}
+	async getStartPageToken() {
+		this.count("startPageToken");
+		return String(this.log.length);
+	}
+	async listChanges(token: string) {
+		this.count("changes");
+		const n = Number(token);
+		if (!Number.isInteger(n) || n < this.minValidToken || n > this.log.length) throw new HttpError("invalid token", 400);
+		return { changes: this.log.slice(n).map((c) => ({ ...c })), newStartPageToken: String(this.log.length) };
+	}
+	/** Deletes everything, like "delete hidden app data" in Drive settings. */
+	wipe() {
+		for (const id of [...this.files.keys()]) {
+			this.files.delete(id);
+			this.record(id);
+		}
+	}
 
 	private count(k: string) {
 		this.calls[k] = (this.calls[k] ?? 0) + 1;
@@ -61,6 +89,7 @@ export class FakeDrive implements RemoteStore {
 		const f: StoredRemote = { id: `id${++this.seq}`, name, appProperties: {}, data: data.slice(0), modifiedTime: this.clock.tick() };
 		this.merge(f.appProperties, appProperties);
 		this.files.set(f.id, f);
+		this.record(f.id);
 		return this.view(f);
 	}
 	async updateContent(id: string, meta: { name?: string; appProperties: AppProps }, data: ArrayBuffer) {
@@ -71,6 +100,7 @@ export class FakeDrive implements RemoteStore {
 		this.merge(f.appProperties, meta.appProperties);
 		f.data = data.slice(0);
 		f.modifiedTime = this.clock.tick();
+		this.record(id);
 		return this.view(f);
 	}
 	async updateMeta(id: string, meta: { name?: string; appProperties?: AppProps }) {
@@ -80,11 +110,12 @@ export class FakeDrive implements RemoteStore {
 		if (meta.name) f.name = meta.name;
 		this.merge(f.appProperties, meta.appProperties);
 		f.modifiedTime = this.clock.tick();
+		this.record(id);
 		return this.view(f);
 	}
 	async remove(id: string) {
 		this.count("remove");
-		this.files.delete(id);
+		if (this.files.delete(id)) this.record(id);
 	}
 
 	live(): Map<string, string> {
@@ -154,9 +185,21 @@ export class MemStore implements StateStore {
 	}
 }
 
+export class MemJson<T> implements JsonStore<T> {
+	value: T | null = null;
+	async load() {
+		return this.value ? (JSON.parse(JSON.stringify(this.value)) as T) : null;
+	}
+	async save(v: T) {
+		this.value = JSON.parse(JSON.stringify(v));
+	}
+}
+
 export class Device {
 	fs: FakeFs;
 	store = new MemStore();
+	/** Every device goes through the cached remote listing, like the plugin does. */
+	cache = new MemJson<RemoteCacheData>();
 	confirm = async () => true;
 	constructor(
 		public name: string,
@@ -188,6 +231,10 @@ export class Device {
 			...this.overrides,
 		};
 		this.clock.tick();
-		return new SyncEngine(this.fs, this.drive, this.store, cfg).run(dryRun);
+		const remote = new CachedRemoteStore(this.drive, this.cache, "client|me|vault1", {
+			fullRefreshMs: 86_400_000,
+			now: () => this.clock.t,
+		});
+		return new SyncEngine(this.fs, remote, this.store, cfg).run(dryRun);
 	}
 }

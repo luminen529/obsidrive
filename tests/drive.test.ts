@@ -64,6 +64,21 @@ describe("DriveClient", () => {
 		expect(tokenCalls()).toBe(2);
 	});
 
+	it("pages through the change feed and maps trashed files to removals", async () => {
+		const { drive, reqs } = setup((req) => {
+			const token = new URL(req.url).searchParams.get("pageToken");
+			return token === "t1"
+				? json(200, { nextPageToken: "t2", changes: [{ fileId: "a", removed: false, file: { id: "a", name: "a.md", appProperties: { ov: "v" } } }] })
+				: json(200, { newStartPageToken: "t3", changes: [{ fileId: "b", removed: true }, { fileId: "c", file: { id: "c", name: "c.md", trashed: true } }] });
+		});
+		const r = await drive.listChanges("t1");
+		expect(r.newStartPageToken).toBe("t3");
+		expect(r.changes.map((c) => [c.fileId, c.removed])).toEqual([["a", false], ["b", true], ["c", true]]);
+		const q = new URL(reqs[0].url).searchParams;
+		expect(q.get("spaces")).toBe("appDataFolder");
+		expect(q.get("includeRemoved")).toBe("true");
+	});
+
 	it("treats 404 on delete as success", async () => {
 		const { drive } = setup(() => json(404, { error: { message: "not found" } }));
 		await expect(drive.remove("x")).resolves.toBeUndefined();
