@@ -3,3 +3,6 @@ main.js
 *.map
 data.json
 sync-state.json
+
+# Personal notes (not tracked)
+/docs.md
