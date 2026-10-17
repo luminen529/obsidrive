@@ -1,0 +1,9 @@
+{
+  "id": "obsidrive",
+  "name": "ObsiDrive",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.2",
+  "description": "Sync your vault, settings and plugins to a hidden app folder in your own Google Drive.",
+  "author": "kanghyun",
+  "isDesktopOnly": false
+}
