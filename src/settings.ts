@@ -8,6 +8,8 @@ export interface ObsiDriveSettings {
 	/** SecretStorage id that holds the refresh token (managed by the plugin). */
 	tokenSecretId: string;
 	accountEmail: string;
+	/** Remote vault key that completed a manual first sync on this device. */
+	syncedVaultKey: string;
 
 	// Remote
 	remoteVaultName: string;
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: ObsiDriveSettings = {
 	clientSecretId: "",
 	tokenSecretId: "",
 	accountEmail: "",
+	syncedVaultKey: "",
 
 	remoteVaultName: "",
 	deviceName: "",

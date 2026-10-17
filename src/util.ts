@@ -86,6 +86,27 @@ export function conflictPath(path: string, device: string, now: number): string 
 	return `${stem} (conflict ${formatStamp(now)} ${safeLabel(device)})${ext}`;
 }
 
+/**
+ * Union of two JSON string lists, remote order first. Returns null if either side
+ * is not a JSON array of strings, and `changed: false` if the result equals remote.
+ */
+export function mergeJsonLists(local: ArrayBuffer, remote: ArrayBuffer): { data: ArrayBuffer; changed: boolean } | null {
+	const parse = (b: ArrayBuffer): string[] | null => {
+		try {
+			const v = JSON.parse(new TextDecoder().decode(b));
+			return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : null;
+		} catch {
+			return null;
+		}
+	};
+	const l = parse(local);
+	const r = parse(remote);
+	if (!l || !r) return null;
+	const extra = l.filter((x) => !r.includes(x));
+	const merged = [...r, ...extra];
+	return { data: new TextEncoder().encode(JSON.stringify(merged, null, 2)).buffer as ArrayBuffer, changed: extra.length > 0 };
+}
+
 export function errorMessage(e: unknown): string {
 	if (e instanceof Error) return e.message;
 	return String(e);

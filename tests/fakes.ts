@@ -171,7 +171,12 @@ export class Device {
 		const cfg: EngineConfig = {
 			vaultKey: "vault1",
 			device: this.name,
-			planOptions: { strategy: "keepBoth", configStrategy: "newer", isConfigPath: (p) => p.startsWith(".obsidian/") },
+			planOptions: {
+				strategy: "keepBoth",
+				configStrategy: "newer",
+				isConfigPath: (p) => p.startsWith(".obsidian/"),
+				isMergeableList: (p) => p === ".obsidian/community-plugins.json",
+			},
 			includes: () => true,
 			maxBytes: 1024 * 1024,
 			concurrency: 3,

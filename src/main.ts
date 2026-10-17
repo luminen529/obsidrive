@@ -312,6 +312,12 @@ export default class ObsiDrivePlugin extends Plugin {
 
 	async autoSync(trigger: string) {
 		if (this.settings.paused || !this.isConnected() || this.syncing) return;
+		// The first sync with a remote vault must be started by hand (after checking
+		// the remote vault name), so a new device never syncs before it is set up.
+		if (this.settings.syncedVaultKey !== (await this.vaultKey())) {
+			this.setStatus({ kind: "paused", text: "첫 동기화는 '지금 동기화'로" });
+			return;
+		}
 		if (!navigator.onLine) {
 			this.setStatus({ kind: "offline" });
 			return;
@@ -374,6 +380,7 @@ export default class ObsiDrivePlugin extends Plugin {
 				strategy: s.conflictStrategy,
 				configStrategy: s.configConflictStrategy,
 				isConfigPath: (p) => filter.isConfigPath(p),
+				isMergeableList: (p) => p === `${this.app.vault.configDir}/community-plugins.json`,
 			},
 			includes: (p) => filter.includes(p),
 			maxBytes: filter.maxBytes,
@@ -414,6 +421,10 @@ export default class ObsiDrivePlugin extends Plugin {
 			const report = await engine.run(!!opts.dryRun);
 			this.lastReport = report;
 			if (!opts.dryRun) this.lastSyncAt = Date.now();
+			if (!opts.dryRun && !report.aborted && s.syncedVaultKey !== vaultKey) {
+				s.syncedVaultKey = vaultKey;
+				await this.saveData(s);
+			}
 			this.afterSync(report, opts.interactive);
 			return report;
 		} catch (e) {

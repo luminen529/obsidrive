@@ -243,6 +243,36 @@ describe("two-device sync", () => {
 		expect([...B.fs.files.keys()]).toEqual(["note.md"]);
 	});
 
+	it("a freshly created vault does not overwrite established settings", async () => {
+		A.fs.put(".obsidian/app.json", '{"vimMode":true}');
+		A.fs.put(".obsidian/community-plugins.json", JSON.stringify(["dataview", "obsidrive"]));
+		A.fs.put("note.md", "hi");
+		await A.sync();
+		// New device: Obsidian just wrote its defaults (newer mtimes) and BRAT was installed.
+		B.fs.put(".obsidian/app.json", "{}");
+		B.fs.put(".obsidian/community-plugins.json", JSON.stringify(["obsidian42-brat", "obsidrive"]));
+		const r = await B.sync();
+		expect(r.conflicts).toEqual([]);
+		expect(r.configChanged).toBe(true);
+		expect(B.fs.get(".obsidian/app.json")).toBe('{"vimMode":true}');
+		expect(JSON.parse(B.fs.get(".obsidian/community-plugins.json")!)).toEqual(["dataview", "obsidrive", "obsidian42-brat"]);
+		expect(B.fs.get("note.md")).toBe("hi");
+		await A.sync();
+		expect(A.fs.get(".obsidian/app.json")).toBe('{"vimMode":true}');
+		expect(JSON.parse(A.fs.get(".obsidian/community-plugins.json")!)).toEqual(["dataview", "obsidrive", "obsidian42-brat"]);
+	});
+
+	it("after the first sync, config conflicts go back to newest-wins", async () => {
+		A.fs.put(".obsidian/community-plugins.json", JSON.stringify(["a", "b"]));
+		await A.sync();
+		await B.sync();
+		A.fs.put(".obsidian/community-plugins.json", JSON.stringify(["a"])); // plugin b disabled on laptop
+		B.fs.put(".obsidian/community-plugins.json", JSON.stringify(["a", "b", "c"])); // newer edit on phone
+		await A.sync();
+		await B.sync();
+		expect(JSON.parse(B.fs.get(".obsidian/community-plugins.json")!)).toEqual(["a", "b", "c"]);
+	});
+
 	it("dry run changes nothing", async () => {
 		A.fs.put("a.md", "x");
 		const r = await A.sync(true);

@@ -47,7 +47,7 @@ export type Action =
 	| { kind: "deleteRemote"; path: string; remoteId: string }
 	| { kind: "renameRemote"; from: string; to: string; remoteId: string }
 	| { kind: "renameLocal"; from: string; to: string; remote: RemoteEntry }
-	| { kind: "conflict"; path: string; remote: RemoteEntry; resolution: "keepBoth" | "useLocal" | "useRemote" }
+	| { kind: "conflict"; path: string; remote: RemoteEntry; resolution: "keepBoth" | "useLocal" | "useRemote" | "mergeList" }
 	| { kind: "record"; path: string; base: BaseEntry }
 	| { kind: "forget"; path: string };
 

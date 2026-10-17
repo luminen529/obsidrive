@@ -4,7 +4,7 @@
 
 import type { AppProps, RemoteFile } from "../drive";
 import { PROP_DELETED, PROP_DEVICE, PROP_HASH, PROP_MTIME, PROP_VAULT } from "../drive";
-import { conflictPath, errorMessage, runPool, sha256Hex } from "../util";
+import { conflictPath, errorMessage, mergeJsonLists, runPool, sha256Hex } from "../util";
 import { knownLocalHash, normalizeRemote, plan, PlanOptions } from "./planner";
 import { Action, BaseEntry, emptyReport, LocalEntry, RemoteEntry, SyncReport, SyncState } from "./types";
 
@@ -436,6 +436,22 @@ export class SyncEngine {
 			return;
 		}
 		const { data, hash } = await this.downloadVerified(a.remote);
+		if (a.resolution === "mergeList") {
+			const merged = mergeJsonLists(await this.local.read(a.path), data);
+			report.configChanged = true;
+			if (merged?.changed) {
+				await this.local.write(a.path, merged.data, this.now());
+				await this.doUpload(a.path, a.remote.id, a.remote.hash);
+				report.uploaded.push(a.path);
+				cfg.log(`⚔ 첫 동기화 → 목록 합침: ${a.path}`);
+				return;
+			}
+			// Not a list, or nothing to add: take the remote version.
+			await this.writeAndRecord(a.path, a.remote, data, hash);
+			report.downloaded.push(a.path);
+			cfg.log(`⚔ 첫 동기화 → 원격 사용: ${a.path}`);
+			return;
+		}
 		if (a.resolution === "useRemote") {
 			await this.writeAndRecord(a.path, a.remote, data, hash);
 			report.downloaded.push(a.path);
