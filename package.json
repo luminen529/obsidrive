@@ -1,6 +1,6 @@
 {
   "name": "obsidrive",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Obsidian Google Drive (appDataFolder) sync plugin",
   "main": "main.js",
   "scripts": {
