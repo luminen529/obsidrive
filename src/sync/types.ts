@@ -43,6 +43,8 @@ export interface SyncState {
 /** The remote file as the plan saw it; remote writes re-check it right before acting. */
 export interface RemoteExpect {
 	id: string;
+	/** Name (vault path) at planning time; another device may rename the file meanwhile. */
+	path: string;
 	hash: string;
 	deleted: boolean;
 	deletedAt: number;

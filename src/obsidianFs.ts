@@ -7,7 +7,7 @@ import type { PathFilter } from "./filter";
 import type { FileState, OwnWriteTracker } from "./ownWrites";
 import type { LocalFs, StateStore } from "./sync/engine";
 import type { LocalEntry, SyncState } from "./sync/types";
-import { dirname } from "./util";
+import { dirname, sha256Hex } from "./util";
 
 const PLUGIN_FILES = ["main.js", "manifest.json", "styles.css", "data.json"];
 
@@ -21,7 +21,7 @@ function toState(st: Stat): FileState {
 /** A tracked path and a check that its state after the operation is the one we intended. */
 interface Tracked {
 	path: string;
-	verify: (state: FileState) => boolean;
+	verify: (state: FileState) => boolean | Promise<boolean>;
 }
 
 const isGone = (s: FileState) => s === null;
@@ -45,7 +45,8 @@ export class ObsidianLocalFs implements LocalFs {
 		} finally {
 			for (const item of items) {
 				const state = toState(await this.adapter.stat(item.path).catch(() => null));
-				this.tracker?.settle(item.path, item.verify(state) ? state : undefined);
+				const ok = await Promise.resolve(item.verify(state)).catch(() => false);
+				this.tracker?.settle(item.path, ok ? state : undefined);
 			}
 		}
 	}
@@ -197,8 +198,17 @@ export class ObsidianLocalFs implements LocalFs {
 		const file = this.filter.isConfigPath(path) ? null : this.app.vault.getAbstractFileByPath(path);
 		if (!(file instanceof TFile)) return "unsupported";
 		let replaced = false;
-		const size = new TextEncoder().encode(next).byteLength;
-		await this.track([{ path, verify: (s) => replaced && s?.kind === "file" && s.size === size }], () =>
+		const nextBytes = new TextEncoder().encode(next);
+		const nextHash = await sha256Hex(nextBytes.buffer as ArrayBuffer);
+		// Size alone is not proof: a same-size user save right after process() would be adopted as ours.
+		// Only accept a stat that provably belongs to our content (stat, read, unchanged stat, same hash).
+		const verify = async (s: FileState) => {
+			if (!replaced || s?.kind !== "file" || s.size !== nextBytes.byteLength) return false;
+			const data = await this.adapter.readBinary(path);
+			const after = toState(await this.adapter.stat(path));
+			return after?.kind === "file" && after.mtime === s.mtime && after.size === s.size && (await sha256Hex(data)) === nextHash;
+		};
+		await this.track([{ path, verify }], () =>
 			this.app.vault.process(file, (current) => {
 				replaced = current === expected;
 				return replaced ? next : current;

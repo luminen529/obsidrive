@@ -7,7 +7,7 @@
     "dev": "node scripts/build.mjs",
     "build": "tsc --noEmit && node scripts/build.mjs production",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --config tests/vitest.config.mts",
     "version": "node scripts/version-bump.mjs && git add manifest.json versions.json",
     "release": "node scripts/release.mjs"
   },

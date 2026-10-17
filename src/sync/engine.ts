@@ -312,7 +312,13 @@ export class SyncEngine {
 		if (curText === null) return false;
 		const res = await this.local.replaceText(path, curText, next);
 		if (res === "unsupported") return false;
-		if (res === "changed") throw new SkipError("쓰기 직전에 로컬 파일이 수정됨 — 덮어쓰지 않음 (다음 동기화에서 충돌로 처리)");
+		if (res === "changed") {
+			// Either the user just edited it, or Obsidian's text read normalizes this file
+			// (e.g. BOM/line endings) so the comparison can never match. Tell them apart by bytes.
+			const again = await this.readStable(path);
+			if (again.hash === planned) return false; // bytes untouched: use the guarded binary write
+			throw new SkipError("쓰기 직전에 로컬 파일이 수정됨 — 덮어쓰지 않음 (다음 동기화에서 충돌로 처리)");
+		}
 		const st = await this.verifiedState(path, hash, data.byteLength, -1);
 		this.setBase(path, this.baseFor(hash, st, r.id));
 		if (!r.hash) await this.remote.updateMeta(r.id, { appProperties: { [PROP_HASH]: hash } });
@@ -345,20 +351,23 @@ export class SyncEngine {
 	 * still has the content the plan was based on. Drive has no conditional writes,
 	 * so a very small window remains between this check and the write.
 	 */
-	private async remoteState(remoteId: string, expectHash: string): Promise<"same" | "changed" | "deleted" | "gone"> {
+	private async remoteState(remoteId: string, expectPath: string, expectHash: string): Promise<"same" | "changed" | "deleted" | "gone"> {
 		const meta = await this.remote.getMeta(remoteId);
 		if (!meta) return "gone";
+		// Renamed by another device: it is a different file now, never act on it under the old path.
+		if (meta.name !== expectPath) return "changed";
 		if (meta.appProperties[PROP_DELETED]) return "deleted";
 		return (meta.appProperties[PROP_HASH] ?? "") === expectHash ? "same" : "changed";
 	}
 
-	/** Re-reads the remote file and compares content and deletion state with what the plan saw. */
+	/** Re-reads the remote file and compares name, content and deletion state with what the plan saw. */
 	private async checkRemote(expect: RemoteExpect): Promise<"match" | "gone" | "mismatch"> {
 		const meta = await this.remote.getMeta(expect.id);
 		if (!meta) return "gone";
 		const p = meta.appProperties;
 		const deleted = !!p[PROP_DELETED];
 		const same =
+			meta.name === expect.path &&
 			(p[PROP_HASH] ?? "") === expect.hash &&
 			deleted === expect.deleted &&
 			(!deleted || Number(p[PROP_DELETED]) === expect.deletedAt);
@@ -445,7 +454,7 @@ export class SyncEngine {
 					}
 					case "deleteRemote": {
 						// A newer edit from another device must win over this deletion.
-						const st = await this.remoteState(a.remoteId, this.state.files[a.path]?.h ?? "");
+						const st = await this.remoteState(a.remoteId, a.path, this.state.files[a.path]?.h ?? "");
 						if (st === "changed") {
 							throw new SkipError("다른 기기에서 수정되어 원격 삭제를 취소함 (다음 동기화에서 다운로드)");
 						}
@@ -467,7 +476,7 @@ export class SyncEngine {
 						const l = local.get(a.to);
 						if (!l?.hash) throw new SkipError("이름 변경 대상 해시 없음");
 						// The rename only makes sense if the remote still holds this exact content.
-						const st = await this.remoteState(a.remoteId, l.hash);
+						const st = await this.remoteState(a.remoteId, a.from, l.hash);
 						if (st !== "same") {
 							throw new SkipError("원격 파일이 동기화 도중 변경되어 이름 변경을 건너뜀 (다음 동기화에서 처리)");
 						}

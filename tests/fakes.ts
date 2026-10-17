@@ -7,7 +7,7 @@ import { EngineConfig, LocalFs, RemoteStore, StateStore, SyncEngine } from "../s
 import type { SyncReport, SyncState } from "../src/sync/types";
 
 export const enc = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
-export const dec = (b: ArrayBuffer) => new TextDecoder().decode(b);
+export const dec = (b: ArrayBuffer) => new TextDecoder("utf-8", { ignoreBOM: true }).decode(b);
 
 export class Clock {
 	t = 1_700_000_000_000;

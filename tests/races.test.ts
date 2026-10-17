@@ -209,6 +209,70 @@ describe("concurrent edits during a sync", () => {
 		expect(B.fs.get("img.png")).toBe("PNG2");
 	});
 
+	it("[P1] duplicate cleanup never deletes a copy another device just renamed into its own file", async () => {
+		// Two identical "n.md" files exist remotely (both devices created it at once).
+		const data = enc("same");
+		const props = { ov: "vault1", oh: await sha256Hex(data), om: "1" };
+		const older = await drive.create("n.md", { ...props, odv: "laptop" }, data);
+		await drive.create("n.md", { ...props, odv: "phone" }, data);
+
+		// After A's full listing and catch-up, the tablet renames the older copy to keep.md.
+		drive.onListed = async () => {
+			drive.onListed = async () => {
+				await drive.updateMeta(older.id, { name: "keep.md" });
+			};
+		};
+		await expect(A.sync()).rejects.toThrow(/정리 도중 변경/);
+		expect(drive.live().get("keep.md")).toBe("same");
+
+		await A.sync();
+		expect(A.fs.get("keep.md")).toBe("same");
+		expect(A.fs.get("n.md")).toBe("same");
+	});
+
+	it("[P1] a remote deletion does not tombstone a file another device just renamed", async () => {
+		A.fs.put("n.md", "content");
+		await A.sync();
+		A.fs.files.delete("n.md");
+
+		drive.onListed = async () => {
+			await drive.updateMeta(remoteId("n.md"), { name: "moved.md" });
+		};
+		const r = await A.sync();
+		expect(r.deletedRemote).toEqual([]);
+		expect(drive.tombstones()).toEqual([]);
+
+		await A.sync();
+		expect(A.fs.get("moved.md")).toBe("content");
+	});
+
+	it("[P1] a remote rename is skipped if another device renamed the file first", async () => {
+		A.fs.put("a.png", "IMG");
+		await A.sync();
+		const f = A.fs.files.get("a.png")!;
+		A.fs.files.delete("a.png");
+		A.fs.files.set("b.png", f);
+
+		drive.onListed = async () => {
+			await drive.updateMeta(remoteId("a.png"), { name: "tablet-name.png" });
+		};
+		const r = await A.sync();
+		expect(r.renamed).toEqual([]);
+		expect(drive.live().has("tablet-name.png")).toBe(true);
+	});
+
+	it("falls back to the guarded write when Obsidian's text read never matches the bytes", async () => {
+		A.fs.put("n.md", "\uFEFFv1\r\n");
+		await A.sync();
+		await B.sync();
+		A.fs.put("n.md", "\uFEFFv2\r\n");
+		await A.sync();
+		B.fs.replaceText = async () => "changed"; // e.g. BOM stripped on read, bytes untouched
+		const r = await B.sync();
+		expect(r.downloaded).toEqual(["n.md"]);
+		expect(B.fs.get("n.md")).toBe("\uFEFFv2\r\n");
+	});
+
 	it("downloaded content always matches its recorded hash", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();

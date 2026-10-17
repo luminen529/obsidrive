@@ -12,7 +12,7 @@ import { conflictPath } from "../util";
 import type { Action, BaseEntry, ConflictStrategy, LocalEntry, RemoteEntry, RemoteExpect, RemoteFix } from "./types";
 
 export function expectOf(r: RemoteEntry): RemoteExpect {
-	return { id: r.id, hash: r.hash, deleted: r.deleted, deletedAt: r.deletedAt };
+	return { id: r.id, path: r.path, hash: r.hash, deleted: r.deleted, deletedAt: r.deletedAt };
 }
 
 export function knownLocalHash(l: LocalEntry, b: BaseEntry | undefined): string | undefined {

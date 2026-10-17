@@ -8,6 +8,8 @@ import { basename, patternToRegExp } from "./util";
 const PLUGIN_CODE_FILES = new Set(["main.js", "manifest.json", "styles.css"]);
 const DEVICE_LOCAL_CONFIG = new Set(["workspace.json", "workspace-mobile.json"]);
 const JUNK_NAMES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+/** Temporary notes created by the "text replace self-test" command; never synced. */
+export const SELFTEST_PREFIX = "__obsidrive_selftest__";
 
 export class PathFilter {
 	private ignore: RegExp[];
@@ -50,7 +52,7 @@ export class PathFilter {
 		if (!path || path.startsWith("/") || path.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) {
 			return false;
 		}
-		if (JUNK_NAMES.has(basename(path))) return false;
+		if (JUNK_NAMES.has(basename(path)) || basename(path).startsWith(SELFTEST_PREFIX)) return false;
 		if (this.ignore.some((r) => r.test(path))) return false;
 
 		if (!this.isConfigPath(path)) {

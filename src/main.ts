@@ -15,6 +15,7 @@ import { PathFilter } from "./filter";
 import { AuthError, HttpFn, lowerKeys } from "./http";
 import { FileStateStore, JsonFileStore, ObsidianLocalFs } from "./obsidianFs";
 import { FileState, OwnWriteTracker } from "./ownWrites";
+import { runTextReplaceSelfTest } from "./selfTest";
 import { CachedRemoteStore, RemoteCacheData } from "./remoteCache";
 import { DEFAULT_SETTINGS, ObsiDriveSettings } from "./settings";
 import { SyncEngine, toRemoteEntry } from "./sync/engine";
@@ -109,6 +110,20 @@ export default class ObsiDrivePlugin extends Plugin {
 			},
 		});
 		this.addCommand({ id: "cancel-sync", name: "진행 중인 동기화 취소", callback: () => (this.cancelRequested = true) });
+		this.addCommand({
+			id: "selftest-text-replace",
+			name: "자가 진단: 노트 교체 시 바이트 보존 확인",
+			callback: async () => {
+				const filter = new PathFilter(this.app.vault.configDir, this.settings, this.manifest.id);
+				try {
+					const r = await runTextReplaceSelfTest(this.app, filter, this.ownWrites);
+					this.log(`자가 진단(노트 교체): ${r.ok ? "통과" : "실패"} — ${r.message}`);
+					new Notice(`ObsiDrive 자가 진단 ${r.ok ? "✅ 통과" : "❌ 실패"}\n${r.message}`, 0);
+				} catch (e) {
+					new Notice(`ObsiDrive 자가 진단 오류: ${errorMessage(e)}`, 0);
+				}
+			},
+		});
 
 		this.registerEvent(this.app.vault.on("modify", (f) => this.onVaultChange(f)));
 		this.registerEvent(this.app.vault.on("create", (f) => this.onVaultChange(f)));

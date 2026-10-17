@@ -71,6 +71,29 @@ describe("OwnWriteTracker", () => {
 		expect(changes()).toBe(1);
 	});
 
+	it("[P2] a user move during our delete is reported for the path we never touched", () => {
+		const { t, disk, changes } = setup();
+		disk.set("a.md", file(1, 1));
+		t.begin(["a.md"]); // we are deleting a.md
+		disk.delete("a.md");
+		disk.set("b.md", file(1, 1)); // ...while the user moved it to b.md
+		t.onEvent(["b.md", "a.md"]);
+		expect(changes()).toBe(0); // deferred as one event
+		t.settle("a.md", null); // our side looks fine, but b.md is a user change
+		expect(changes()).toBe(1);
+	});
+
+	it("a deferred event waits until all of its in-progress paths settle", () => {
+		const { t, disk, changes } = setup();
+		t.begin(["a.md", "b.md"]);
+		disk.set("b.md", file(9, 9));
+		t.onEvent(["b.md", "a.md"]);
+		t.settle("a.md", null);
+		expect(changes()).toBe(0); // b.md still in progress
+		t.settle("b.md", undefined);
+		expect(changes()).toBe(1);
+	});
+
 	it("unknown paths are always user changes", () => {
 		const { t, changes } = setup();
 		t.onEvent(["other.md"]);

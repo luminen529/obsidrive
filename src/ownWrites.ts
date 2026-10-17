@@ -12,7 +12,8 @@ type Expectation = { mtime: number; size: number } | null | "folder" | "pending"
 
 export class OwnWriteTracker {
 	private expected = new Map<string, Expectation>();
-	private deferred = new Set<string>();
+	/** Events that arrived while one of their paths was being written, kept as whole path groups. */
+	private deferred: string[][] = [];
 
 	constructor(
 		/** Current state of a path as the vault sees it. */
@@ -35,8 +36,22 @@ export class OwnWriteTracker {
 		else if (state === null) this.expected.set(path, null);
 		else if (state.kind === "folder") this.expected.set(path, "folder");
 		else this.expected.set(path, { mtime: state.mtime, size: state.size });
+		this.flushDeferred();
+	}
 
-		if (this.deferred.delete(path) && !this.isOwn(path)) this.onChange();
+	/**
+	 * Judges deferred events whose paths are no longer in progress. Every path of
+	 * the event is checked, including ones the sync never touched (e.g. the new
+	 * name of a file the user moved), which count as user changes.
+	 */
+	private flushDeferred() {
+		let changed = false;
+		this.deferred = this.deferred.filter((group) => {
+			if (group.some((p) => this.expected.get(p) === "pending")) return true;
+			if (!group.every((p) => this.isOwn(p))) changed = true;
+			return false;
+		});
+		if (changed) this.onChange();
 	}
 
 	folderCreated(path: string) {
@@ -46,7 +61,7 @@ export class OwnWriteTracker {
 	/** Classifies a vault event touching `paths` (one path, or new + old path for renames). */
 	onEvent(paths: string[]) {
 		if (paths.some((p) => this.expected.get(p) === "pending")) {
-			for (const p of paths) this.deferred.add(p);
+			this.deferred.push([...paths]);
 			return;
 		}
 		if (!paths.every((p) => this.isOwn(p))) this.onChange();
