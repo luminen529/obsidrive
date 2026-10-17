@@ -5,8 +5,8 @@
 import type { AppProps, RemoteFile } from "../drive";
 import { PROP_DELETED, PROP_DEVICE, PROP_HASH, PROP_MTIME, PROP_VAULT } from "../drive";
 import { conflictPath, errorMessage, mergeJsonLists, runPool, sha256Hex } from "../util";
-import { knownLocalHash, normalizeRemote, plan, PlanOptions } from "./planner";
-import { Action, BaseEntry, emptyReport, LocalEntry, RemoteEntry, SyncReport, SyncState } from "./types";
+import { expectOf, knownLocalHash, normalizeRemote, plan, PlanOptions } from "./planner";
+import { Action, BaseEntry, emptyReport, LocalEntry, RemoteEntry, RemoteExpect, SyncReport, SyncState } from "./types";
 
 export interface LocalFs {
 	/** Every candidate local file (the engine applies the path filter). */
@@ -20,6 +20,23 @@ export interface LocalFs {
 	trash(path: string): Promise<void>;
 	/** Removes folders left empty after deletions/renames (best effort). */
 	cleanupEmptyFolders(paths: string[]): Promise<void>;
+	/**
+	 * Optional atomic compare-and-replace for text notes: writes `next` only if the
+	 * file still holds exactly `expected`.
+	 */
+	replaceText?(path: string, expected: string, next: string): Promise<"replaced" | "changed" | "unsupported">;
+}
+
+/** Regular notes that can be replaced atomically as text. */
+const TEXT_NOTE = /\.(md|canvas|base|txt)$/i;
+
+function decodeUtf8Strict(data: ArrayBuffer): string | null {
+	try {
+		// ignoreBOM keeps a BOM in the string, so re-encoding gives back identical bytes.
+		return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data);
+	} catch {
+		return null;
+	}
 }
 
 export interface RemoteStore {
@@ -106,12 +123,19 @@ export class SyncEngine {
 
 			if (!dryRun && fixes.length) {
 				for (const fix of fixes) {
+					// Another device may have restored or edited the file since we listed it.
+					// The rest of the plan assumes these fixes happened, so on any doubt stop the run.
+					const st = await this.checkRemote(fix.expect);
+					if (st === "mismatch" || (st === "gone" && fix.kind === "renameRemoteDuplicate")) {
+						throw new Error("원격 파일이 정리 도중 변경되었습니다. 이번 동기화를 중단하고 다음에 다시 시도합니다.");
+					}
+					if (st === "gone") continue;
 					if (fix.kind === "removeRemote") {
 						cfg.log(`원격 정리: ${fix.path} (${fix.why})`);
-						await this.remote.remove(fix.id);
+						await this.remote.remove(fix.expect.id);
 					} else {
 						cfg.log(`원격 중복 → 충돌 사본: ${fix.from} → ${fix.to}`);
-						await this.remote.updateMeta(fix.id, { name: fix.to });
+						await this.remote.updateMeta(fix.expect.id, { name: fix.to });
 					}
 				}
 			}
@@ -204,7 +228,11 @@ export class SyncEngine {
 		if (todo.length) this.cfg.log(`변경 확인을 위해 ${todo.length}개 파일 해시 계산 중…`);
 		await runPool(todo, this.cfg.concurrency, async (l) => {
 			try {
-				l.hash = await sha256Hex(await this.local.read(l.path));
+				// Hash and stat from the same stable read, so they describe one version.
+				const cur = await this.readStable(l.path);
+				l.hash = cur.hash;
+				l.mtime = cur.mtime;
+				l.size = cur.size;
 			} catch (e) {
 				report.skipped.push({ path: l.path, reason: `읽기 실패: ${errorMessage(e)}` });
 			}
@@ -260,11 +288,56 @@ export class SyncEngine {
 		if (!(await this.unchangedSincePlan(path, seen))) {
 			throw new SkipError("다운로드하는 동안 로컬 파일이 수정됨 — 덮어쓰지 않음 (다음 동기화에서 충돌로 처리)");
 		}
-		await this.local.write(path, data, r.mtime || r.modifiedTime);
-		const st = await this.local.stat(path);
-		if (!st) throw new Error("쓰기 후 파일을 찾을 수 없음");
-		this.setBase(path, { h: hash, lm: st.mtime, ls: st.size, rid: r.id });
+		const mtime = r.mtime || r.modifiedTime;
+		if (await this.tryReplaceText(path, r, data, hash, seen)) return;
+		await this.local.write(path, data, mtime);
+		const st = await this.verifiedState(path, hash, data.byteLength, mtime);
+		this.setBase(path, this.baseFor(hash, st, r.id));
 		if (!r.hash) await this.remote.updateMeta(r.id, { appProperties: { [PROP_HASH]: hash } });
+	}
+
+	/**
+	 * For an existing text note, replaces its content atomically (Vault.process) only
+	 * if it still holds the version the plan was based on. Returns false when not
+	 * applicable, so the caller falls back to a normal write.
+	 */
+	private async tryReplaceText(path: string, r: RemoteEntry, data: ArrayBuffer, hash: string, seen: LocalEntry | undefined) {
+		if (!seen || !this.local.replaceText || !TEXT_NOTE.test(path) || this.cfg.planOptions.isConfigPath(path)) return false;
+		const planned = knownLocalHash(seen, this.state.files[path]);
+		const next = decodeUtf8Strict(data);
+		if (!planned || next === null) return false;
+		const cur = await this.readStable(path);
+		if (cur.hash !== planned) throw new SkipError("다운로드하는 동안 로컬 파일이 수정됨 — 덮어쓰지 않음 (다음 동기화에서 충돌로 처리)");
+		const curText = decodeUtf8Strict(cur.data);
+		if (curText === null) return false;
+		const res = await this.local.replaceText(path, curText, next);
+		if (res === "unsupported") return false;
+		if (res === "changed") throw new SkipError("쓰기 직전에 로컬 파일이 수정됨 — 덮어쓰지 않음 (다음 동기화에서 충돌로 처리)");
+		const st = await this.verifiedState(path, hash, data.byteLength, -1);
+		this.setBase(path, this.baseFor(hash, st, r.id));
+		if (!r.hash) await this.remote.updateMeta(r.id, { appProperties: { [PROP_HASH]: hash } });
+		return true;
+	}
+
+	/**
+	 * The stat that belongs to content `hash`, or null if that cannot be shown
+	 * (e.g. the user saved right after our write). Never pairs a hash with the
+	 * stat of a different version.
+	 */
+	private async verifiedState(path: string, hash: string, size: number, mtime: number): Promise<{ mtime: number; size: number } | null> {
+		const st = await this.local.stat(path);
+		if (st && st.size === size && st.mtime === mtime) return st; // exactly what we wrote
+		try {
+			const now = await this.readStable(path);
+			return now.hash === hash ? { mtime: now.mtime, size: now.size } : null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Base entry; an unknown stat forces a re-hash next time, so a newer local edit is never mistaken as synced. */
+	private baseFor(hash: string, st: { mtime: number; size: number } | null, rid: string): BaseEntry {
+		return { h: hash, lm: st ? st.mtime : -1, ls: st ? st.size : -1, rid };
 	}
 
 	/**
@@ -279,16 +352,29 @@ export class SyncEngine {
 		return (meta.appProperties[PROP_HASH] ?? "") === expectHash ? "same" : "changed";
 	}
 
-	private async doUpload(path: string, remoteId: string | undefined, expectRemoteHash: string | undefined, name?: string) {
+	/** Re-reads the remote file and compares content and deletion state with what the plan saw. */
+	private async checkRemote(expect: RemoteExpect): Promise<"match" | "gone" | "mismatch"> {
+		const meta = await this.remote.getMeta(expect.id);
+		if (!meta) return "gone";
+		const p = meta.appProperties;
+		const deleted = !!p[PROP_DELETED];
+		const same =
+			(p[PROP_HASH] ?? "") === expect.hash &&
+			deleted === expect.deleted &&
+			(!deleted || Number(p[PROP_DELETED]) === expect.deletedAt);
+		return same ? "match" : "mismatch";
+	}
+
+	/** `expect` is the remote file the plan saw at this path (live or tombstone), if any. */
+	private async doUpload(path: string, expect: RemoteExpect | undefined, name?: string) {
 		const { data, hash, mtime, size } = await this.readStable(path);
 		let f: RemoteFile;
-		if (remoteId) {
-			// Optimistic concurrency: make sure nobody replaced the remote file since we listed it.
-			if (expectRemoteHash !== undefined) {
-				const st = await this.remoteState(remoteId, expectRemoteHash);
-				if (st === "changed") throw new SkipError("원격 파일이 동기화 도중 변경됨 (다음 동기화에서 처리)");
-				if (st === "gone") remoteId = undefined;
-			}
+		let remoteId = expect?.id;
+		if (expect) {
+			// Also covers reviving a tombstone: if another device restored or edited it meanwhile, stop.
+			const st = await this.checkRemote(expect);
+			if (st === "mismatch") throw new SkipError("원격 파일이 동기화 도중 변경됨 (다음 동기화에서 처리)");
+			if (st === "gone") remoteId = undefined;
 		}
 		if (remoteId) f = await this.remote.updateContent(remoteId, { name: name ?? path, appProperties: this.props(hash, mtime) }, data);
 		else f = await this.remote.create(name ?? path, this.props(hash, mtime), data);
@@ -328,8 +414,7 @@ export class SyncEngine {
 						this.setBase(a.path, null);
 						break;
 					case "upload": {
-						const b = this.state.files[a.path];
-						await this.doUpload(a.path, a.remoteId, a.remoteId ? (b?.h ?? undefined) : undefined);
+						await this.doUpload(a.path, a.remote);
 						report.uploaded.push(a.path);
 						cfg.log(`↑ ${a.path} (${a.reason})`);
 						break;
@@ -415,8 +500,11 @@ export class SyncEngine {
 						}
 						const st = await this.local.stat(a.to);
 						if (!st) throw new Error("이름 변경 후 파일을 찾을 수 없음");
+						// A rename keeps mtime/size; anything else means the user already edited it.
+						const seen = local.get(a.from)!;
+						const intact = st.mtime === seen.mtime && st.size === seen.size;
 						this.setBase(a.from, null);
-						this.setBase(a.to, { h: a.remote.hash, lm: st.mtime, ls: st.size, rid: a.remote.id });
+						this.setBase(a.to, this.baseFor(a.remote.hash, intact ? st : null, a.remote.id));
 						touchedFolders.push(a.from);
 						report.renamed.push(`${a.from} → ${a.to}`);
 						cfg.log(`↓ 이름 변경: ${a.from} → ${a.to}`);
@@ -471,7 +559,7 @@ export class SyncEngine {
 		if (!(await this.unchangedSincePlan(a.path, seen))) throw new SkipError("로컬 파일이 동기화 도중 변경됨");
 
 		if (a.resolution === "useLocal") {
-			await this.doUpload(a.path, a.remote.id, a.remote.hash);
+			await this.doUpload(a.path, expectOf(a.remote));
 			report.uploaded.push(a.path);
 			cfg.log(`⚔ 충돌 → 로컬 유지: ${a.path}`);
 			return;
@@ -485,7 +573,7 @@ export class SyncEngine {
 			report.configChanged = true;
 			if (merged?.changed) {
 				await this.local.write(a.path, merged.data, this.now());
-				await this.doUpload(a.path, a.remote.id, a.remote.hash);
+				await this.doUpload(a.path, expectOf(a.remote));
 				report.uploaded.push(a.path);
 				cfg.log(`⚔ 첫 동기화 → 목록 합침: ${a.path}`);
 				return;
@@ -509,7 +597,7 @@ export class SyncEngine {
 		for (let n = 2; await this.local.stat(copy); n++) copy = conflictPath(a.path, `${cfg.device} ${n}`, this.now());
 		await this.local.rename(a.path, copy);
 		await this.writeAndRecord(a.path, a.remote, data, hash, undefined);
-		await this.doUpload(copy, undefined, undefined);
+		await this.doUpload(copy, undefined);
 		report.conflicts.push(`${a.path} → ${copy}`);
 		cfg.log(`⚔ 충돌 → 둘 다 보관: ${copy}`);
 	}

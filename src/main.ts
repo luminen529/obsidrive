@@ -13,7 +13,8 @@ import {
 import { DriveClient } from "./drive";
 import { PathFilter } from "./filter";
 import { AuthError, HttpFn, lowerKeys } from "./http";
-import { FileStateStore, JsonFileStore, ObsidianLocalFs, OwnWrites } from "./obsidianFs";
+import { FileStateStore, JsonFileStore, ObsidianLocalFs } from "./obsidianFs";
+import { FileState, OwnWriteTracker } from "./ownWrites";
 import { CachedRemoteStore, RemoteCacheData } from "./remoteCache";
 import { DEFAULT_SETTINGS, ObsiDriveSettings } from "./settings";
 import { SyncEngine, toRemoteEntry } from "./sync/engine";
@@ -49,9 +50,11 @@ export default class ObsiDrivePlugin extends Plugin {
 	private syncing: Promise<SyncReport | null> | null = null;
 	private cancelRequested = false;
 	private changedDuringSync = false;
-	private localFs: ObsidianLocalFs | null = null;
-	/** Expected file states left by the last sync, to tell our own vault events from user edits. */
-	private lastOwnWrites: OwnWrites | null = null;
+	/** Tells vault events caused by our own writes apart from user edits. */
+	private ownWrites = new OwnWriteTracker(
+		(path) => this.vaultState(path),
+		() => this.markChanged(),
+	);
 	private markerEnsuredFor = "";
 	private statusEl: HTMLElement | null = null;
 	private ribbonEl: HTMLElement | null = null;
@@ -367,8 +370,12 @@ export default class ObsiDrivePlugin extends Plugin {
 
 	private onVaultChange(file: TAbstractFile, oldPath?: string) {
 		if (!this.isConnected() || this.settings.paused) return;
-		const own = this.localFs?.ownWrites ?? this.lastOwnWrites;
-		if (own && this.isOwnEvent(own, file.path) && (!oldPath || this.isOwnEvent(own, oldPath))) return;
+		this.ownWrites.onEvent(oldPath ? [file.path, oldPath] : [file.path]);
+	}
+
+	/** A user change was detected: sync soon (or again right after the running sync). */
+	private markChanged() {
+		if (!this.isConnected() || this.settings.paused) return;
 		if (this.syncing) {
 			this.changedDuringSync = true;
 			return;
@@ -376,18 +383,11 @@ export default class ObsiDrivePlugin extends Plugin {
 		if (this.settings.syncAfterChangeSeconds > 0) this.debouncedSync();
 	}
 
-	/**
-	 * An event is ours only if the file is still exactly in the state the sync left it in.
-	 * If the user edited the same path afterwards, mtime/size differ and it counts as a change.
-	 */
-	private isOwnEvent(own: OwnWrites, path: string): boolean {
-		const expected = own.get(path);
-		if (expected === undefined) return false;
-		if (expected === "pending") return true; // fired from inside our own write call
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (expected === "folder") return file instanceof TFolder;
-		if (expected === null) return file === null; // we removed or moved it away
-		return file instanceof TFile && file.stat.mtime === expected.mtime && file.stat.size === expected.size;
+	private vaultState(path: string): FileState {
+		const f = this.app.vault.getAbstractFileByPath(path);
+		if (f instanceof TFile) return { kind: "file", mtime: f.stat.mtime, size: f.stat.size };
+		if (f instanceof TFolder) return { kind: "folder" };
+		return null;
 	}
 
 	restartScheduler() {
@@ -465,8 +465,7 @@ export default class ObsiDrivePlugin extends Plugin {
 		this.changedDuringSync = false;
 		const s = this.settings;
 		const filter = new PathFilter(this.app.vault.configDir, s, this.manifest.id);
-		const localFs = new ObsidianLocalFs(this.app, filter);
-		this.localFs = localFs;
+		const localFs = new ObsidianLocalFs(this.app, filter, this.ownWrites);
 		const vaultKey = await this.vaultKey();
 		const store = this.stateStore();
 		const remote = new CachedRemoteStore(
@@ -547,9 +546,6 @@ export default class ObsiDrivePlugin extends Plugin {
 				if (opts.interactive || navigator.onLine) new Notice(`ObsiDrive 동기화 실패: ${errorMessage(e)}`, 10000);
 			}
 			return report;
-		} finally {
-			this.lastOwnWrites = localFs.ownWrites;
-			this.localFs = null;
 		}
 	}
 
@@ -604,7 +600,7 @@ export default class ObsiDrivePlugin extends Plugin {
 
 	private async restoreFromTrash(picked: RemoteEntry[]) {
 		const filter = new PathFilter(this.app.vault.configDir, this.settings, this.manifest.id);
-		const fs = new ObsidianLocalFs(this.app, filter);
+		const fs = new ObsidianLocalFs(this.app, filter, this.ownWrites);
 		let ok = 0;
 		for (const e of picked) {
 			try {

@@ -145,8 +145,10 @@ export class FakeDrive implements RemoteStore {
 export class FakeFs implements LocalFs {
 	files = new Map<string, { data: ArrayBuffer; mtime: number }>();
 	trashed: string[] = [];
-	/** Hook to simulate edits racing the sync. */
+	/** Hooks to simulate edits racing the sync. */
 	beforeStat?: (path: string) => void;
+	afterWrite?: (path: string) => void;
+	beforeReplace?: (path: string) => void;
 	constructor(private clock: Clock) {}
 
 	put(path: string, content: string) {
@@ -175,6 +177,17 @@ export class FakeFs implements LocalFs {
 	}
 	async write(path: string, data: ArrayBuffer, mtime: number) {
 		this.files.set(path, { data: data.slice(0), mtime: mtime || this.clock.tick() });
+		this.afterWrite?.(path);
+	}
+	/** Like Vault.process: compare-and-replace in one step. */
+	async replaceText(path: string, expected: string, next: string): Promise<"replaced" | "changed" | "unsupported"> {
+		this.beforeReplace?.(path);
+		const f = this.files.get(path);
+		if (!f) return "unsupported";
+		if (dec(f.data) !== expected) return "changed";
+		this.files.set(path, { data: enc(next), mtime: this.clock.tick() });
+		this.afterWrite?.(path);
+		return "replaced";
 	}
 	async rename(from: string, to: string) {
 		const f = this.files.get(from);

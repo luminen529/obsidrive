@@ -75,18 +75,16 @@ export class CachedRemoteStore implements RemoteStore {
 			}
 		}
 
-		// Take the token first: changes made while listing are replayed next time (upserts are idempotent).
-		const token = await this.inner.getStartPageToken();
-		const files = await this.inner.listVault(vaultKey);
-		await this.store.save({
-			version: 1,
-			scope: this.scope,
-			token,
-			fullAt: this.now(),
-			files: Object.fromEntries(files.map((f) => [f.id, f])),
-		});
-		this.log(`원격 전체 목록 ${files.length}개 저장`);
-		return files;
+		// Take the token first, then catch up once after listing: changes made while the
+		// listing was running are applied now instead of only on the next run (upserts are idempotent).
+		const startToken = await this.inner.getStartPageToken();
+		const listed = await this.inner.listVault(vaultKey);
+		const files: Record<string, RemoteFile> = Object.fromEntries(listed.map((f) => [f.id, f]));
+		const { changes, newStartPageToken } = await this.inner.listChanges(startToken);
+		for (const c of changes) applyChange(files, c, vaultKey);
+		await this.store.save({ version: 1, scope: this.scope, token: newStartPageToken, fullAt: this.now(), files });
+		this.log(`원격 전체 목록 ${Object.keys(files).length}개 저장 (목록 중 변경 ${changes.length}건 반영)`);
+		return Object.values(files);
 	}
 
 	getMeta(id: string) {

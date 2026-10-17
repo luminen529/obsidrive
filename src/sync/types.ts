@@ -40,8 +40,16 @@ export interface SyncState {
 	files: Record<string, BaseEntry>;
 }
 
+/** The remote file as the plan saw it; remote writes re-check it right before acting. */
+export interface RemoteExpect {
+	id: string;
+	hash: string;
+	deleted: boolean;
+	deletedAt: number;
+}
+
 export type Action =
-	| { kind: "upload"; path: string; remoteId?: string; reason: string }
+	| { kind: "upload"; path: string; remote?: RemoteExpect; reason: string }
 	| { kind: "download"; path: string; remote: RemoteEntry; reason: string }
 	| { kind: "deleteLocal"; path: string }
 	| { kind: "deleteRemote"; path: string; remoteId: string }
@@ -52,8 +60,8 @@ export type Action =
 	| { kind: "forget"; path: string };
 
 export type RemoteFix =
-	| { kind: "removeRemote"; id: string; path: string; why: string }
-	| { kind: "renameRemoteDuplicate"; id: string; from: string; to: string };
+	| { kind: "removeRemote"; expect: RemoteExpect; path: string; why: string }
+	| { kind: "renameRemoteDuplicate"; expect: RemoteExpect; from: string; to: string };
 
 export interface SyncReport {
 	startedAt: number;

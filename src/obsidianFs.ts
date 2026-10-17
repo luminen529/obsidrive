@@ -4,39 +4,51 @@
 
 import { App, normalizePath, TFile, TFolder } from "obsidian";
 import type { PathFilter } from "./filter";
+import type { FileState, OwnWriteTracker } from "./ownWrites";
 import type { LocalFs, StateStore } from "./sync/engine";
 import type { LocalEntry, SyncState } from "./sync/types";
 import { dirname } from "./util";
 
 const PLUGIN_FILES = ["main.js", "manifest.json", "styles.css", "data.json"];
 
-/**
- * What each path written by the sync should look like afterwards:
- * a stat, null (removed/moved away), "folder" (created) or "pending" (write in progress).
- */
-export type OwnWrites = Map<string, { mtime: number; size: number } | null | "pending" | "folder">;
+type Stat = { type: string; mtime: number; size: number } | null;
+
+function toState(st: Stat): FileState {
+	if (!st) return null;
+	return st.type === "folder" ? { kind: "folder" } : { kind: "file", mtime: st.mtime, size: st.size };
+}
+
+/** A tracked path and a check that its state after the operation is the one we intended. */
+interface Tracked {
+	path: string;
+	verify: (state: FileState) => boolean;
+}
+
+const isGone = (s: FileState) => s === null;
 
 export class ObsidianLocalFs implements LocalFs {
-	/** Expected states of paths touched by the sync engine; used to ignore our own vault events. */
-	readonly ownWrites: OwnWrites = new Map();
-
-	/** Marks `paths` as being written, runs `op`, then records the resulting states. */
-	private async track<T>(paths: string[], op: () => Promise<T>): Promise<T> {
-		for (const p of paths) this.ownWrites.set(p, "pending");
-		try {
-			return await op();
-		} finally {
-			for (const p of paths) {
-				const st = await this.adapter.stat(p).catch(() => null);
-				this.ownWrites.set(p, st && st.type === "file" ? { mtime: st.mtime, size: st.size } : null);
-			}
-		}
-	}
-
 	constructor(
 		private app: App,
 		private filter: PathFilter,
+		private tracker?: OwnWriteTracker,
 	) {}
+
+	/**
+	 * Runs `op` with its paths marked as in progress, then records each verified
+	 * result. Results that do not match the intent (e.g. the user saved at the
+	 * same moment) are left unverified, so their events count as user changes.
+	 */
+	private async track<T>(items: Tracked[], op: () => Promise<T>): Promise<T> {
+		this.tracker?.begin(items.map((i) => i.path));
+		try {
+			return await op();
+		} finally {
+			for (const item of items) {
+				const state = toState(await this.adapter.stat(item.path).catch(() => null));
+				this.tracker?.settle(item.path, item.verify(state) ? state : undefined);
+			}
+		}
+	}
 
 	private get adapter() {
 		return this.app.vault.adapter;
@@ -104,7 +116,7 @@ export class ObsidianLocalFs implements LocalFs {
 		if (existing instanceof TFolder) return;
 		if (existing) throw new Error(`폴더 위치에 파일이 있습니다: ${dir}`);
 		await this.ensureFolder(dirname(dir));
-		this.ownWrites.set(dir, "folder");
+		this.tracker?.folderCreated(dir);
 		try {
 			await this.app.vault.createFolder(dir);
 		} catch (e) {
@@ -117,7 +129,8 @@ export class ObsidianLocalFs implements LocalFs {
 		path = normalizePath(path);
 		await this.ensureFolder(dirname(path));
 		const opts = mtime > 0 ? { mtime } : undefined;
-		await this.track([path], async () => {
+		const verify = (s: FileState) => s?.kind === "file" && s.size === data.byteLength && (mtime <= 0 || s.mtime === mtime);
+		await this.track([{ path, verify }], async () => {
 			if (this.filter.isConfigPath(path)) {
 				await this.adapter.writeBinary(path, data, opts);
 				return;
@@ -137,7 +150,11 @@ export class ObsidianLocalFs implements LocalFs {
 
 	async rename(from: string, to: string): Promise<void> {
 		await this.ensureFolder(dirname(to));
-		await this.track([from, to], async () => {
+		// A rename keeps mtime and size.
+		const before = toState(await this.adapter.stat(from));
+		const intact = (s: FileState) =>
+			s?.kind === "file" && before?.kind === "file" && s.mtime === before.mtime && s.size === before.size;
+		await this.track([{ path: from, verify: isGone }, { path: to, verify: intact }], async () => {
 			const file = this.filter.isConfigPath(from) ? null : this.app.vault.getAbstractFileByPath(from);
 			// Vault.rename (not FileManager.renameFile): links were already updated on the other device.
 			if (file) await this.app.vault.rename(file, to);
@@ -146,7 +163,7 @@ export class ObsidianLocalFs implements LocalFs {
 	}
 
 	async trash(path: string): Promise<void> {
-		await this.track([path], async () => {
+		await this.track([{ path, verify: isGone }], async () => {
 			const file = this.filter.isConfigPath(path) ? null : this.app.vault.getAbstractFileByPath(path);
 			if (file) {
 				// Respects the user's "deleted files" preference (system trash / .trash / permanent).
@@ -167,9 +184,27 @@ export class ObsidianLocalFs implements LocalFs {
 		for (const d of [...dirs].sort((a, b) => b.length - a.length)) {
 			const folder = this.app.vault.getAbstractFileByPath(d);
 			if (folder instanceof TFolder && folder.children.length === 0 && !folder.isRoot()) {
-				await this.track([d], () => this.app.vault.delete(folder));
+				await this.track([{ path: d, verify: isGone }], () => this.app.vault.delete(folder));
 			}
 		}
+	}
+
+	/**
+	 * Atomic compare-and-replace for regular text notes via Vault.process: the
+	 * new text is only written if the note still holds exactly `expected`.
+	 */
+	async replaceText(path: string, expected: string, next: string): Promise<"replaced" | "changed" | "unsupported"> {
+		const file = this.filter.isConfigPath(path) ? null : this.app.vault.getAbstractFileByPath(path);
+		if (!(file instanceof TFile)) return "unsupported";
+		let replaced = false;
+		const size = new TextEncoder().encode(next).byteLength;
+		await this.track([{ path, verify: (s) => replaced && s?.kind === "file" && s.size === size }], () =>
+			this.app.vault.process(file, (current) => {
+				replaced = current === expected;
+				return replaced ? next : current;
+			}),
+		);
+		return replaced ? "replaced" : "changed";
 	}
 }
 

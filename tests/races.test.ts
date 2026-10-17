@@ -116,6 +116,99 @@ describe("concurrent edits during a sync", () => {
 		expect(A.cache.saves).toBe(cacheSaves);
 	});
 
+	it("[P1] re-creating a deleted path does not overwrite a tombstone another device just restored", async () => {
+		A.fs.put("n.md", "v1");
+		await A.sync();
+		A.fs.files.delete("n.md");
+		await A.sync(); // tombstone, base entry gone
+		A.fs.put("n.md", "re-created on laptop");
+
+		// Right after A lists, the tablet restores the tombstone with newer content.
+		drive.onListed = async () => {
+			const data = enc("restored on tablet");
+			await drive.updateContent(remoteId("n.md"), { appProperties: { od: null, oh: await sha256Hex(data), odv: "tablet" } }, data);
+		};
+		const r = await A.sync();
+		expect(r.uploaded).toEqual([]);
+		expect(dec([...drive.files.values()].find((f) => f.name === "n.md")!.data)).toBe("restored on tablet");
+
+		const r2 = await A.sync(); // both versions survive as a conflict
+		expect(r2.conflicts).toHaveLength(1);
+		expect(new Set(A.fs.snapshot().values())).toEqual(new Set(["restored on tablet", "re-created on laptop"]));
+	});
+
+	it("[P1] purging an expired tombstone never deletes a file another device just restored", async () => {
+		A.fs.put("n.md", "v1");
+		await A.sync();
+		await B.sync();
+		A.fs.files.delete("n.md");
+		await A.sync();
+		await B.sync(); // both devices dropped it; only the tombstone is left
+		clock.tick(31 * 86_400_000); // past the 30-day retention
+
+		// The cache is old now, so A does a full listing plus one catch-up fetch.
+		// The restore lands after both, i.e. after the purge has been planned.
+		drive.onListed = async () => {
+			drive.onListed = async () => {
+				const data = enc("restored on tablet");
+				await drive.updateContent(remoteId("n.md"), { appProperties: { od: null, oh: await sha256Hex(data), odv: "tablet" } }, data);
+			};
+		};
+		await expect(A.sync()).rejects.toThrow(/정리 도중 변경/);
+		expect(drive.live().get("n.md")).toBe("restored on tablet");
+
+		await A.sync();
+		expect(A.fs.get("n.md")).toBe("restored on tablet");
+	});
+
+	it("[P1] a user save right after a download is not recorded as already synced", async () => {
+		A.fs.put("n.md", "v1");
+		await A.sync();
+		await B.sync();
+		A.fs.put("n.md", "v2");
+		await A.sync();
+
+		B.fs.afterWrite = (path) => {
+			B.fs.afterWrite = undefined;
+			B.fs.put(path, "saved on phone right after the download");
+		};
+		await B.sync();
+		const r = await B.sync(); // the phone's save must still go up
+		expect(r.uploaded).toEqual(["n.md"]);
+		expect(drive.live().get("n.md")).toBe("saved on phone right after the download");
+		await A.sync();
+		expect(A.fs.get("n.md")).toBe("saved on phone right after the download");
+	});
+
+	it("text notes are replaced atomically: an edit just before the swap is kept", async () => {
+		A.fs.put("n.md", "v1");
+		await A.sync();
+		await B.sync();
+		A.fs.put("n.md", "v2");
+		await A.sync();
+
+		B.fs.beforeReplace = (path) => {
+			B.fs.beforeReplace = undefined;
+			B.fs.put(path, "typed during the swap");
+		};
+		const r = await B.sync();
+		expect(r.downloaded).toEqual([]);
+		expect(B.fs.get("n.md")).toBe("typed during the swap");
+		const r2 = await B.sync();
+		expect(r2.conflicts).toHaveLength(1);
+	});
+
+	it("binary files still use the guarded write path", async () => {
+		A.fs.put("img.png", "PNG1");
+		await A.sync();
+		await B.sync();
+		A.fs.put("img.png", "PNG2");
+		await A.sync();
+		const r = await B.sync();
+		expect(r.downloaded).toEqual(["img.png"]);
+		expect(B.fs.get("img.png")).toBe("PNG2");
+	});
+
 	it("downloaded content always matches its recorded hash", async () => {
 		A.fs.put("n.md", "v1");
 		await A.sync();

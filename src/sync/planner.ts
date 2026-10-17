@@ -9,7 +9,11 @@
 //    a non-"keepBoth" strategy.
 
 import { conflictPath } from "../util";
-import type { Action, BaseEntry, ConflictStrategy, LocalEntry, RemoteEntry, RemoteFix } from "./types";
+import type { Action, BaseEntry, ConflictStrategy, LocalEntry, RemoteEntry, RemoteExpect, RemoteFix } from "./types";
+
+export function expectOf(r: RemoteEntry): RemoteExpect {
+	return { id: r.id, hash: r.hash, deleted: r.deleted, deletedAt: r.deletedAt };
+}
 
 export function knownLocalHash(l: LocalEntry, b: BaseEntry | undefined): string | undefined {
 	if (l.hash) return l.hash;
@@ -51,7 +55,7 @@ export function plan(
 		const record = () => {
 			actions.push({ kind: "record", path, base: { h: lHash!, lm: l!.mtime, ls: l!.size, rid: rLive!.id } });
 		};
-		const upload = (reason: string) => actions.push({ kind: "upload", path, remoteId: r?.id, reason });
+		const upload = (reason: string) => actions.push({ kind: "upload", path, remote: r ? expectOf(r) : undefined, reason });
 		const download = (reason: string) => actions.push({ kind: "download", path, remote: rLive!, reason });
 
 		// Identical content on both sides: nothing to transfer, just remember it.
@@ -158,7 +162,7 @@ function detectRenames(
 	const drop = new Set<Action>();
 	const extra: Action[] = [];
 	for (const a of actions) {
-		if (a.kind === "upload" && !a.remoteId && !opts.isConfigPath(a.path)) {
+		if (a.kind === "upload" && !a.remote && !opts.isConfigPath(a.path)) {
 			const h = local.get(a.path)?.hash;
 			const del = h ? remoteDeletes.get(h) : undefined;
 			if (del && !drop.has(del)) {
@@ -205,7 +209,7 @@ export function normalizeRemote(
 		const tombs = list.filter((e) => e.deleted).sort((a, b) => b.deletedAt - a.deletedAt);
 
 		if (live.length > 0) {
-			for (const t of tombs) fixes.push({ kind: "removeRemote", id: t.id, path, why: "tombstone superseded" });
+			for (const t of tombs) fixes.push({ kind: "removeRemote", expect: expectOf(t), path, why: "tombstone superseded" });
 			const rid = base[path]?.rid;
 			live.sort((a, b) => b.modifiedTime - a.modifiedTime);
 			const canonical = live.find((e) => e.id === rid) ?? live[0];
@@ -213,22 +217,22 @@ export function normalizeRemote(
 			for (const dup of live) {
 				if (dup === canonical) continue;
 				if (dup.hash && dup.hash === canonical.hash) {
-					fixes.push({ kind: "removeRemote", id: dup.id, path, why: "identical duplicate" });
+					fixes.push({ kind: "removeRemote", expect: expectOf(dup), path, why: "identical duplicate" });
 					continue;
 				}
 				let to = conflictPath(path, dup.device || "remote", dup.modifiedTime || now);
 				for (let n = 2; taken.has(to); n++) to = conflictPath(path, `${dup.device || "remote"} ${n}`, dup.modifiedTime || now);
 				taken.add(to);
-				fixes.push({ kind: "renameRemoteDuplicate", id: dup.id, from: path, to });
+				fixes.push({ kind: "renameRemoteDuplicate", expect: expectOf(dup), from: path, to });
 				remote.set(to, { ...dup, path: to });
 			}
 			continue;
 		}
 
 		const [newest, ...older] = tombs;
-		for (const t of older) fixes.push({ kind: "removeRemote", id: t.id, path, why: "duplicate tombstone" });
+		for (const t of older) fixes.push({ kind: "removeRemote", expect: expectOf(t), path, why: "duplicate tombstone" });
 		if (newest.deletedAt && now - newest.deletedAt > tombstoneMaxAgeMs) {
-			fixes.push({ kind: "removeRemote", id: newest.id, path, why: "tombstone expired" });
+			fixes.push({ kind: "removeRemote", expect: expectOf(newest), path, why: "tombstone expired" });
 			continue;
 		}
 		remote.set(path, newest);

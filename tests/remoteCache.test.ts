@@ -28,7 +28,7 @@ describe("CachedRemoteStore", () => {
 		await drive.updateMeta(b.id, { name: "c.md" });
 		expect(names(await remote.listVault("vault1"))).toEqual(["a.md", "c.md"]);
 		expect(drive.calls.list).toBe(1);
-		expect(drive.calls.changes).toBe(1);
+		expect(drive.calls.changes).toBe(2); // catch-up after the full listing + one incremental fetch
 	});
 
 	it("drops removed files while tombstones stay visible", async () => {
@@ -56,7 +56,7 @@ describe("CachedRemoteStore", () => {
 		const remote = cached();
 		await remote.listVault("vault1");
 		await drive.create("b.md", props(), enc("b"));
-		drive.minValidToken = 999;
+		drive.minValidToken = drive.log.length; // every token issued before now is rejected
 		expect(names(await remote.listVault("vault1"))).toEqual(["a.md", "b.md"]);
 		expect(drive.calls.list).toBe(2);
 	});
@@ -83,6 +83,14 @@ describe("CachedRemoteStore", () => {
 			throw new Error("offline");
 		};
 		await expect(remote.listVault("vault1")).rejects.toThrow("offline");
+	});
+
+	it("applies changes made while the full listing was running", async () => {
+		await drive.create("a.md", props(), enc("a"));
+		drive.onListed = async () => {
+			await drive.create("b.md", props(), enc("b")); // lands after the listing snapshot
+		};
+		expect(names(await cached().listVault("vault1"))).toEqual(["a.md", "b.md"]);
 	});
 
 	it("an idle sync costs one change-feed request and no listing", async () => {
