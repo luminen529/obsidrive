@@ -1,5 +1,5 @@
 node_modules/
-main.js
+dist/
 *.map
 data.json
 sync-state.json*

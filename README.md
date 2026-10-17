@@ -66,7 +66,7 @@ npm install
 npm run build
 ```
 
-만들어진 `main.js`, `manifest.json`, `styles.css`를 볼트의 `.obsidian/plugins/obsidrive/` 폴더에 복사한 뒤, 커뮤니티 플러그인에서 켜면 됩니다.
+`dist/` 폴더에 만들어진 `main.js`, `manifest.json`, `styles.css`를 볼트의 `.obsidian/plugins/obsidrive/` 폴더에 복사한 뒤, 커뮤니티 플러그인에서 켜면 됩니다.
 
 </details>
 
@@ -227,6 +227,8 @@ npm test
 | `src/auth.ts` | OAuth PKCE (데스크톱 루프백 / 수동 붙여넣기) |
 | `src/obsidianFs.ts` | Obsidian Vault/Adapter 연동 |
 | `src/filter.ts` | 동기화 대상 판정 |
-| `tests/` | 가짜 Drive · 파일시스템으로 두 기기 시나리오 테스트 |
+| `tests/` | 가짜 Drive · 파일시스템으로 두 기기 시나리오 · 경합 테스트 |
+| `scripts/` | 빌드(`dist/`로 출력), 버전 올리기, 릴리스 스크립트 |
+| `docs/` | GitHub Pages (홈페이지 · 개인정보처리방침) |
 
 버그 제보나 제안은 [Issues](https://github.com/luminen529/obsidrive/issues)에 남겨 주세요. 🙌

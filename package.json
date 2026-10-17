@@ -4,8 +4,8 @@
   "description": "Obsidian Google Drive (appDataFolder) sync plugin",
   "main": "main.js",
   "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "dev": "node scripts/build.mjs",
+    "build": "tsc --noEmit && node scripts/build.mjs production",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "version": "node scripts/version-bump.mjs && git add manifest.json versions.json",

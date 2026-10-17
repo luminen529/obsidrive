@@ -6,7 +6,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const ASSETS = ["main.js", "manifest.json", "styles.css"];
+const ASSETS = ["dist/main.js", "dist/manifest.json", "dist/styles.css"];
 
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" });
 const out = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
