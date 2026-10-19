@@ -15,6 +15,7 @@ import { PathFilter } from "./filter";
 import { AuthError, HttpFn, lowerKeys } from "./http";
 import { FileStateStore, JsonFileStore, ObsidianLocalFs } from "./obsidianFs";
 import { FileState, OwnWriteTracker } from "./ownWrites";
+import { applyPluginStates, installedPluginIds } from "./pluginState";
 import { runTextReplaceSelfTest } from "./selfTest";
 import { CachedRemoteStore, RemoteCacheData } from "./remoteCache";
 import { DEFAULT_SETTINGS, ObsiDriveSettings } from "./settings";
@@ -497,7 +498,6 @@ export default class ObsiDrivePlugin extends Plugin {
 				strategy: s.conflictStrategy,
 				configStrategy: s.configConflictStrategy,
 				isConfigPath: (p) => filter.isConfigPath(p),
-				isMergeableList: (p) => p === `${this.app.vault.configDir}/community-plugins.json`,
 			},
 			includes: (p) => filter.includes(p),
 			maxBytes: filter.maxBytes,
@@ -530,12 +530,24 @@ export default class ObsiDrivePlugin extends Plugin {
 
 		this.log(`── 동기화 시작 (${opts.trigger}${opts.dryRun ? ", 미리보기" : ""}) ──`);
 		this.setStatus({ kind: "syncing" });
+		const firstSync = s.syncedVaultKey !== vaultKey;
+		const pluginsBefore = !opts.dryRun && s.syncPlugins ? await installedPluginIds(this.app).catch(() => null) : null;
+		const updatePlugins = async (report: SyncReport) => {
+			if (!pluginsBefore) return;
+			try {
+				const args = { before: pluginsBefore, report, firstSync, isMobile: Platform.isMobile, isSynced: (p: string) => filter.includes(p) };
+				if (await applyPluginStates(this.app, args, (m) => this.log(m))) report.configChanged = true;
+			} catch (e) {
+				this.log(`플러그인 활성화 상태 갱신 실패: ${errorMessage(e)}`);
+			}
+		};
 		try {
 			if (!opts.dryRun && this.markerEnsuredFor !== vaultKey) {
 				await this.drive.ensureVaultMarker(vaultKey, s.remoteVaultName.trim());
 				this.markerEnsuredFor = vaultKey;
 			}
 			const report = await engine.run(!!opts.dryRun);
+			await updatePlugins(report);
 			this.lastReport = report;
 			// Cancelled or guard-stopped runs are not completed syncs.
 			if (!opts.dryRun && !report.aborted) {
@@ -551,7 +563,10 @@ export default class ObsiDrivePlugin extends Plugin {
 			return report;
 		} catch (e) {
 			const report = (e as { report?: SyncReport }).report ?? null;
-			if (report) this.lastReport = report;
+			if (report) {
+				await updatePlugins(report);
+				this.lastReport = report;
+			}
 			this.log(`동기화 실패: ${errorMessage(e)}`);
 			if (e instanceof AuthError) {
 				this.setStatus({ kind: "disconnected", text: "재로그인 필요" });

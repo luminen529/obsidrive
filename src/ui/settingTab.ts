@@ -209,7 +209,7 @@ export class ObsiDriveSettingTab extends PluginSettingTab {
 					{ name: "CSS 스니펫", control: { type: "toggle", key: "syncSnippets" } },
 					{
 						name: "커뮤니티 플러그인",
-						desc: "플러그인 코드(main.js, manifest.json, styles.css)와 활성화 목록(community-plugins.json).",
+						desc: "플러그인 코드(main.js, manifest.json, styles.css). 켜고 끄는 건 기기마다 따로 정하고, 다른 기기에서 새로 설치된 플러그인은 자동으로 켜집니다.",
 						control: { type: "toggle", key: "syncPlugins" },
 					},
 					{

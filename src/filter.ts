@@ -7,6 +7,8 @@ import { basename, patternToRegExp } from "./util";
 
 const PLUGIN_CODE_FILES = new Set(["main.js", "manifest.json", "styles.css"]);
 const DEVICE_LOCAL_CONFIG = new Set(["workspace.json", "workspace-mobile.json"]);
+/** Which plugins are enabled is decided per device (see pluginState.ts); never synced. */
+const PLUGIN_LIST = "community-plugins.json";
 const JUNK_NAMES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 /** Temporary notes created by the "text replace self-test" command; never synced. */
 export const SELFTEST_PREFIX = "__obsidrive_selftest__";
@@ -68,7 +70,7 @@ export class PathFilter {
 			const name = parts[0];
 			if (!name.endsWith(".json")) return false;
 			if (DEVICE_LOCAL_CONFIG.has(name)) return s.syncWorkspace;
-			if (name === "community-plugins.json") return s.syncPlugins;
+			if (name === PLUGIN_LIST) return false;
 			return s.syncCoreSettings;
 		}
 		if (parts[0] === "themes") return s.syncThemes && parts.length === 3;

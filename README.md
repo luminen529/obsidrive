@@ -105,12 +105,16 @@ ObsiDrive는 중간 서버 없이 **내 Google Cloud 프로젝트의 OAuth 클�
 | ⚙️ Obsidian 설정 | `.obsidian/*.json` | ✅ |
 | 🎨 테마 | `.obsidian/themes/*/` | ✅ |
 | 💅 CSS 스니펫 | `.obsidian/snippets/*.css` | ✅ |
-| 🧩 커뮤니티 플러그인 | `.obsidian/plugins/*/{main.js,manifest.json,styles.css}` + `community-plugins.json` | ✅ |
+| 🧩 커뮤니티 플러그인 | `.obsidian/plugins/*/{main.js,manifest.json,styles.css}` | ✅ |
 | 🔧 플러그인 설정 | `.obsidian/plugins/*/data.json` | ✅ |
 | 🪟 워크스페이스 | `workspace.json`, `workspace-mobile.json` | ⬜ |
 
 - 제외 패턴(glob 또는 `/정규식/`)과 최대 파일 크기도 설정에서 바꿀 수 있어요.
 - ObsiDrive 자신의 폴더(설정, 동기화 상태)는 동기화하지 않습니다.
+- **플러그인을 켜고 끄는 건 기기마다 따로예요.** 설치·업데이트·삭제는 동기화되지만, 활성화 목록(`community-plugins.json`)은 기기별로 둡니다. 모바일에서 플러그인을 꺼도 PC에서는 그대로 켜져 있어요.
+  - 기기에서 처음 동기화할 때 동기화된 플러그인을 모두 켭니다.
+  - 다른 기기에서 새로 설치한 플러그인은 내려받으면서 자동으로 켜지고, 다른 기기에서 삭제한 플러그인은 꺼집니다.
+  - 모바일에서는 데스크톱 전용 플러그인을 켜지 않아요.
 
 ## ⏱️ 언제 동기화하나요?
 
@@ -146,7 +150,7 @@ ObsiDrive는 중간 서버 없이 **내 Google Cloud 프로젝트의 OAuth 클�
 - **동기화 중에 편집해도 괜찮아요**<br>
   덮어쓰거나 지우기 직전에 한 번 더 확인해서, 그 사이 편집한 파일은 다음 동기화로 넘깁니다.
 - **새 기기가 기존 설정을 덮어쓰지 않아요**<br>
-  설정 파일은 기본적으로 더 최근 수정본을 쓰지만, 기기가 처음 동기화할 때는 원격 설정을 우선하고 플러그인 활성화 목록은 합칩니다.
+  설정 파일은 기본적으로 더 최근 수정본을 쓰지만, 기기가 처음 동기화할 때는 원격 설정을 우선합니다.
 
 <details>
 <summary><b>그 밖의 안전장치</b></summary>

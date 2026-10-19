@@ -26,8 +26,6 @@ export interface PlanOptions {
 	/** Strategy for files inside the config folder (conflict copies there are useless). */
 	configStrategy: Exclude<ConflictStrategy, "keepBoth">;
 	isConfigPath: (path: string) => boolean;
-	/** Config files holding a JSON list (community-plugins.json) that are merged on first contact. */
-	isMergeableList?: (path: string) => boolean;
 }
 
 type Side = "absent" | "same" | "changed" | "new";
@@ -113,8 +111,8 @@ function resolveConflict(
 	if (isConfig && !b) {
 		// First contact (e.g. a freshly created vault): the remote holds the established
 		// settings, while local files are just Obsidian's defaults – which would otherwise
-		// look "newer". Plugin lists are merged so plugins installed here stay enabled.
-		return { kind: "conflict", path, remote: r, resolution: opts.isMergeableList?.(path) ? "mergeList" : "useRemote" };
+		// look "newer".
+		return { kind: "conflict", path, remote: r, resolution: "useRemote" };
 	}
 	const strategy = isConfig ? opts.configStrategy : opts.strategy;
 	let resolution: "keepBoth" | "useLocal" | "useRemote";

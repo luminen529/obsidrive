@@ -20,7 +20,7 @@ describe("PathFilter", () => {
 		const f = make();
 		expect(f.includes(".obsidian/app.json")).toBe(true);
 		expect(f.includes(".obsidian/workspace.json")).toBe(false);
-		expect(f.includes(".obsidian/community-plugins.json")).toBe(true);
+		expect(f.includes(".obsidian/community-plugins.json")).toBe(false); // enabled plugins are per device
 		expect(f.includes(".obsidian/themes/Minimal/theme.css")).toBe(true);
 		expect(f.includes(".obsidian/snippets/x.css")).toBe(true);
 		expect(f.includes(".obsidian/plugins/dataview/main.js")).toBe(true);

@@ -249,7 +249,6 @@ export class Device {
 				strategy: "keepBoth",
 				configStrategy: "newer",
 				isConfigPath: (p) => p.startsWith(".obsidian/"),
-				isMergeableList: (p) => p === ".obsidian/community-plugins.json",
 			},
 			includes: () => true,
 			maxBytes: 1024 * 1024,
